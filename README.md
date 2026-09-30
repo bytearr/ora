@@ -14,6 +14,8 @@ ora .\notes.txt        # open that file with its default app
 ora f notes.cfg        # find a file anywhere and open it
 ora f docs notes       # extra words may match the folder
 ora alias vsc "Visual Studio Code"  # then `ora vsc` hits that app
+ora open discord       # show that program in Explorer, don't launch it
+ora open -f notes.cfg  # show that file in its folder
 ```
 
 A clear winner launches immediately. Several close matches open a picker: ↑/↓ move, Enter launches, `1`–`8` pick a row, Esc cancels. With no terminal, ora prints the rows and exits `2`.
@@ -51,6 +53,7 @@ Open a new window after that. `ora completion` also prints bash, zsh, and fish.
 | `ora list` | print the index; in a terminal paged 20 rows at a time (←/→, Home/End, q), piped output is the full list |
 | `ora which <query>` | show winner, score, target and decision without launching |
 | `ora alias <shortcut> <official name>` | add an alias to `config.yaml` |
+| `ora open <query...>` | show the match in Explorer instead of launching it; `-f` searches files like `ora file` |
 
 Flags before the query: `--refresh`, `--min-score`, `-v`.
 

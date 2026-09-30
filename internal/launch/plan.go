@@ -55,6 +55,19 @@ func PlanFor(e index.Entry, extra []string, cwd string, quote func(string) strin
 	}
 }
 
+// SelectPath is the file Explorer should highlight. Shortcuts prefer the
+// resolved target over the .lnk. Store apps have no file.
+func SelectPath(e index.Entry) (string, bool) {
+	p := e.Path()
+	return p, p != ""
+}
+
+// ExplorerSelectArg is the parameter explorer.exe expects. The quotes belong
+// to explorer's own command line; a space in the path must stay inside them.
+func ExplorerSelectArg(path string) string {
+	return `/select,"` + strings.ReplaceAll(path, `"`, "") + `"`
+}
+
 func joinArgs(args []string, quote func(string) string) string {
 	q := make([]string, len(args))
 	for i, a := range args {

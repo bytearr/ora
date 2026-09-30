@@ -18,6 +18,7 @@ import (
 	"ora/internal/config"
 	"ora/internal/discover"
 	"ora/internal/index"
+	"ora/internal/launch"
 	"ora/internal/match"
 	"ora/internal/ui"
 )
@@ -73,6 +74,7 @@ func newRoot() *cobra.Command {
 			RunE:  func(*cobra.Command, []string) error { return a.runList() },
 		},
 		fileCmd(a),
+		openCmd(a),
 		&cobra.Command{
 			Use:   "which <query...>",
 			Short: "Print the winner, score, kind and target without launching",
@@ -103,6 +105,20 @@ func fileCmd(a *app) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&which, "which", false, "print the winner, score and decision without opening")
+	return cmd
+}
+
+func openCmd(a *app) *cobra.Command {
+	var file bool
+	cmd := &cobra.Command{
+		Use:   "open <query...>",
+		Short: "Show the match in Explorer instead of launching it",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return a.runOpen(strings.Join(args, " "), file)
+		},
+	}
+	cmd.Flags().BoolVarP(&file, "file", "f", false, "search files the same way as 'ora file', not programs")
 	return cmd
 }
 
@@ -148,9 +164,48 @@ func (a *app) runLaunch(q string, extra []string) error {
 	if err != nil {
 		return err
 	}
-	return a.resolve(ix, a.rank(ix, q), q, extra, func(e index.Entry, score float64) string {
+	return a.resolve(ix, a.rank(ix, q), q, func(e index.Entry, score float64) string {
 		return fmt.Sprintf("%-40s %-9s %.2f  %s", e.Name, e.Kind, score, describeTarget(e))
+	}, func(e index.Entry) error {
+		return a.launch(ix, e, extra)
 	})
+}
+
+func (a *app) runOpen(q string, file bool) error {
+	if p, ok := openableFile(q); ok {
+		return a.reveal(fileEntry(p))
+	}
+	label := func(e index.Entry, score float64) string {
+		return fmt.Sprintf("%-40s %-9s %.2f  %s", e.Name, e.Kind, score, describeTarget(e))
+	}
+	act := func(e index.Entry) error { return a.reveal(e) }
+	if file {
+		ix, rs, err := a.rankFiles(q)
+		if err != nil {
+			return err
+		}
+		label = func(e index.Entry, score float64) string {
+			return fmt.Sprintf("%.2f  %s", score, e.Target)
+		}
+		return a.resolve(ix, rs, q, label, act)
+	}
+	ix, err := a.loadIndex(a.refresh)
+	if err != nil {
+		return err
+	}
+	return a.resolve(ix, a.rank(ix, q), q, label, act)
+}
+
+func (a *app) reveal(e index.Entry) error {
+	p, ok := launch.SelectPath(e)
+	if !ok {
+		return &exitErr{code: exitNoMatch, msg: fmt.Sprintf("%s has no file path", e.Name)}
+	}
+	a.debug("open: %s %s -> %s", e.Kind, e.Name, p)
+	if err := launch.Reveal(p); err != nil {
+		return &exitErr{code: exitLaunch, msg: fmt.Sprintf("open %q failed: %v", e.Name, err)}
+	}
+	return nil
 }
 
 func fileEntry(p string) index.Entry {
@@ -169,20 +224,35 @@ func (a *app) runFile(q string, which bool) error {
 		}
 		return a.launch(nil, fileEntry(p), nil)
 	}
+	ix, rs, err := a.rankFiles(q)
+	if err != nil {
+		return err
+	}
+	if which {
+		return a.printWhich(ix, rs)
+	}
+	return a.resolve(ix, rs, q, func(e index.Entry, score float64) string {
+		return fmt.Sprintf("%.2f  %s", score, e.Target)
+	}, func(e index.Entry) error {
+		return a.launch(ix, e, nil)
+	})
+}
+
+func (a *app) rankFiles(q string) (*index.Index, []match.Result, error) {
 	start := time.Now()
 	paths, total, err := discover.SearchFiles(a.cfg.Everything, q, fileSearchLimit, a.warn)
 	if errors.Is(err, discover.ErrEverythingNotRunning) {
-		return fmt.Errorf("file search needs Everything (https://www.voidtools.com)")
+		return nil, nil, fmt.Errorf("file search needs Everything (https://www.voidtools.com)")
 	}
 	if err != nil {
-		return fmt.Errorf("everything: %w", err)
+		return nil, nil, fmt.Errorf("everything: %w", err)
 	}
 	a.debug("file search: %d of %d results in %s", len(paths), total, time.Since(start).Round(time.Millisecond))
 	if total > len(paths) && len(paths) >= fileSearchLimit {
 		a.warn("%d files match, only the first %d (by name) are ranked; add a word to narrow it", total, len(paths))
 	}
 	if len(paths) == 0 {
-		return &exitErr{code: exitNoMatch, msg: fmt.Sprintf("no file matches %q", q)}
+		return nil, nil, &exitErr{code: exitNoMatch, msg: fmt.Sprintf("no file matches %q", q)}
 	}
 	ix := &index.Index{Entries: make([]index.Entry, len(paths))}
 	cs := make([]match.Candidate, len(paths))
@@ -190,17 +260,12 @@ func (a *app) runFile(q string, which bool) error {
 		ix.Entries[i] = discover.FileEntry(p)
 		cs[i] = match.Candidate{Name: ix.Entries[i].Name, Parent: ix.Entries[i].Parent}
 	}
-	if which {
-		return a.printWhich(ix, match.Rank(q, cs))
-	}
-	return a.resolve(ix, match.Rank(q, cs), q, nil, func(e index.Entry, score float64) string {
-		return fmt.Sprintf("%.2f  %s", score, e.Target)
-	})
+	return ix, match.Rank(q, cs), nil
 }
 
-// resolve applies the decision to ranked results: launch the winner, ask
-// with the picker, or print the closest entries.
-func (a *app) resolve(ix *index.Index, rs []match.Result, q string, extra []string, label func(index.Entry, float64) string) error {
+// resolve applies the decision to ranked results: run act on the winner,
+// ask with the picker, or print the closest entries.
+func (a *app) resolve(ix *index.Index, rs []match.Result, q string, label func(index.Entry, float64) string, act func(index.Entry) error) error {
 	d, rows := match.Decide(rs, a.cfg.MinScore, a.cfg.AmbiguityGap)
 	if a.verbose {
 		fmt.Fprintf(os.Stderr, "query %q -> %s\n", q, d)
@@ -209,7 +274,7 @@ func (a *app) resolve(ix *index.Index, rs []match.Result, q string, extra []stri
 
 	switch d {
 	case match.Launch:
-		return a.launch(ix, ix.Entries[rows[0].Index], extra)
+		return act(ix.Entries[rows[0].Index])
 	case match.Pick:
 		more := countAbove(rs, match.PickerMin) - len(rows)
 		if !ui.Interactive() {
@@ -234,7 +299,7 @@ func (a *app) resolve(ix *index.Index, rs []match.Result, q string, extra []stri
 		if i < 0 {
 			return &exitErr{code: exitNoMatch}
 		}
-		return a.launch(ix, ix.Entries[rows[i].Index], extra)
+		return act(ix.Entries[rows[i].Index])
 	default:
 		fmt.Fprintf(os.Stderr, "no match for %q. Closest:\n", q)
 		printRows(os.Stderr, ix, rows)

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"ora/internal/index"
 )
 
 func TestOpenableFile(t *testing.T) {
@@ -24,5 +27,28 @@ func TestOpenableFile(t *testing.T) {
 	}
 	if _, ok := openableFile(dir); ok {
 		t.Fatal("directory")
+	}
+}
+
+func TestOpenCommandFlag(t *testing.T) {
+	root := newRoot()
+	cmd, _, err := root.Find([]string{"open", "-f", "notes.cfg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Name() != "open" {
+		t.Fatalf("command %s", cmd.Name())
+	}
+	f := cmd.Flags().Lookup("file")
+	if f == nil || f.Shorthand != "f" {
+		t.Fatalf("flag: %+v", f)
+	}
+}
+
+func TestRevealStoreHasNoPath(t *testing.T) {
+	err := (&app{}).reveal(index.Entry{Name: "Calculator", Kind: index.KindStore, Target: "Calc!App", AUMID: "Calc!App"})
+	var ee *exitErr
+	if !errors.As(err, &ee) || ee.code != exitNoMatch || ee.msg == "" {
+		t.Fatalf("%v", err)
 	}
 }

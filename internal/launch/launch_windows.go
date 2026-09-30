@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -80,6 +81,19 @@ func (s Shell) Launch(e index.Entry, extra []string) error {
 		}
 		return err
 	})
+}
+
+// Reveal highlights path in Explorer. It does not open the file.
+// explorer.exe returns as soon as the existing shell picks up the request,
+// so the exit status is ignored, same as the Store-app fallback.
+func Reveal(path string) error {
+	cmd := exec.Command("explorer.exe")
+	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: "explorer.exe " + ExplorerSelectArg(path)}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go cmd.Wait()
+	return nil
 }
 
 func shellExecute(file, params, dir string) error {
