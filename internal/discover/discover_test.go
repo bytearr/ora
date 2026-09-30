@@ -126,12 +126,20 @@ func TestFileSearch(t *testing.T) {
 	if strings.Contains(s, "ext:") || strings.Contains(s, "Program Files") {
 		t.Errorf("file search must not restrict types or Program Files: %s", s)
 	}
+	open := OpenSearch(ev, `project"notes  list.cfg`)
+	if strings.HasPrefix(open, "file:") || !strings.HasPrefix(open, `"projectnotes" "list.cfg" `) {
+		t.Errorf("open search must include folders: %s", open)
+	}
 }
 
 func TestFileEntry(t *testing.T) {
 	e := FileEntry(`D:\Docs\Configs\ProjectNotes.cfg`)
 	if e.Kind != index.KindFile || e.Name != "Project Notes.cfg" || e.Parent != "Configs" {
 		t.Errorf("file entry: %+v", e)
+	}
+	d := DirEntry(`D:\Docs\Configs`)
+	if d.Kind != index.KindFolder || d.Name != "Configs" || d.Parent != "Docs" || d.Target != `D:\Docs\Configs` {
+		t.Errorf("dir entry: %+v", d)
 	}
 }
 
@@ -146,15 +154,18 @@ func TestQuery2AndList2(t *testing.T) {
 	}
 
 	reply := fakeList2(50, []string{`E:\Apps\a.exe`, `E:\Tools\ü.ahk`}, []uint32{0, 0})
-	paths, total, err := parseList2(reply)
+	paths, total, err := parseList2(reply, false)
 	if err != nil || total != 50 || len(paths) != 2 || paths[1] != `E:\Tools\ü.ahk` {
 		t.Errorf("parse: %v %d %v", paths, total, err)
 	}
 	folder := fakeList2(1, []string{`E:\dir`}, []uint32{ipcItemFolder})
-	if paths, _, _ := parseList2(folder); len(paths) != 0 {
+	if paths, _, _ := parseList2(folder, false); len(paths) != 0 {
 		t.Errorf("folders must be skipped: %v", paths)
 	}
-	if _, _, err := parseList2(reply[:len(reply)-3]); err == nil {
+	if paths, _, err := parseList2(folder, true); err != nil || len(paths) != 1 || paths[0] != `E:\dir` {
+		t.Errorf("open search must keep folders: %v %v", paths, err)
+	}
+	if _, _, err := parseList2(reply[:len(reply)-3], false); err == nil {
 		t.Error("truncated reply must fail")
 	}
 }

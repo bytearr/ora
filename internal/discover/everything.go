@@ -23,7 +23,7 @@ func (Everything) Name() index.Source { return index.SourceEverything }
 
 func (e Everything) Discover(report Reporter) ([]index.Entry, error) {
 	limit := e.Cfg.MaxResults
-	paths, total, err := runQuery(e.Cfg, EverythingSearch(e.Cfg), limit, false, report)
+	paths, total, err := runQuery(e.Cfg, EverythingSearch(e.Cfg), limit, false, false, report)
 	if err != nil {
 		return nil, err
 	}
@@ -50,25 +50,25 @@ func (e Everything) Discover(report Reporter) ([]index.Entry, error) {
 
 // runQuery asks the running Everything over IPC, starts it first when it is
 // not running and autostart is on, and falls back to es.exe if IPC fails.
-func runQuery(ev config.Everything, search string, limit int, matchPath bool, report Reporter) ([]string, int, error) {
+func runQuery(ev config.Everything, search string, limit int, matchPath, keepFolders bool, report Reporter) ([]string, int, error) {
 	var flags uint32
 	if matchPath {
 		flags = ipcMatchPath
 	}
-	paths, total, err := queryIPC(search, uint32(limit), flags)
+	paths, total, err := queryIPC(search, uint32(limit), flags, keepFolders)
 	if errors.Is(err, ErrEverythingNotRunning) && ev.Autostart {
 		if serr := startEverything(report); serr != nil {
 			report("everything: %v", serr)
 			return nil, 0, err
 		}
-		paths, total, err = queryIPC(search, uint32(limit), flags)
+		paths, total, err = queryIPC(search, uint32(limit), flags, keepFolders)
 	}
 	if errors.Is(err, ErrEverythingNotRunning) {
 		return nil, 0, err
 	}
 	if err != nil {
 		report("everything: IPC failed (%v), trying es.exe", err)
-		paths, total, err = queryES(search, limit, matchPath)
+		paths, total, err = queryES(search, limit, matchPath, keepFolders)
 		if err != nil {
 			return nil, 0, fmt.Errorf("es.exe: %w", err)
 		}
@@ -80,14 +80,26 @@ func runQuery(ev config.Everything, search string, limit int, matchPath bool, re
 // occur in the file name; if nothing matches and there are several words,
 // the words may also match folder names. Directory excludes apply.
 func SearchFiles(ev config.Everything, query string, limit int, report Reporter) ([]string, int, error) {
+	return searchPaths(ev, query, limit, false, report)
+}
+
+// SearchOpen is the live search behind `ora open -f`: files and folders.
+func SearchOpen(ev config.Everything, query string, limit int, report Reporter) ([]string, int, error) {
+	return searchPaths(ev, query, limit, true, report)
+}
+
+func searchPaths(ev config.Everything, query string, limit int, keepFolders bool, report Reporter) ([]string, int, error) {
 	excl, err := ExcludeRegexps(ev, false)
 	if err != nil {
 		return nil, 0, err
 	}
 	search := FileSearch(ev, query)
-	paths, total, err := runQuery(ev, search, limit, false, report)
+	if keepFolders {
+		search = OpenSearch(ev, query)
+	}
+	paths, total, err := runQuery(ev, search, limit, false, keepFolders, report)
 	if err == nil && len(paths) == 0 && len(strings.Fields(query)) > 1 {
-		paths, total, err = runQuery(ev, search, limit, true, report)
+		paths, total, err = runQuery(ev, search, limit, true, keepFolders, report)
 	}
 	if err != nil {
 		return nil, 0, err
@@ -140,7 +152,7 @@ func buildQuery2(replyHwnd, replyID, searchFlags, maxResults uint32, search stri
 
 // parseList2 decodes an EVERYTHING_IPC_LIST2 reply that carries only
 // FULL_PATH_AND_NAME. Returns file paths and the total match count.
-func parseList2(b []byte) ([]string, int, error) {
+func parseList2(b []byte, keepFolders bool) ([]string, int, error) {
 	if len(b) < list2HeaderSize {
 		return nil, 0, errors.New("everything reply too short")
 	}
@@ -165,7 +177,7 @@ func parseList2(b []byte) ([]string, int, error) {
 		if off+4+2*n > len(b) {
 			return nil, total, errors.New("everything reply truncated (name)")
 		}
-		if flags&ipcItemFolder != 0 {
+		if flags&ipcItemFolder != 0 && !keepFolders {
 			continue
 		}
 		u := make([]uint16, n)

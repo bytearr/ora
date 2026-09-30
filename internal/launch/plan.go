@@ -65,7 +65,21 @@ func SelectPath(e index.Entry) (string, bool) {
 // ExplorerSelectArg is the parameter explorer.exe expects. The quotes belong
 // to explorer's own command line; a space in the path must stay inside them.
 func ExplorerSelectArg(path string) string {
-	return `/select,"` + strings.ReplaceAll(path, `"`, "") + `"`
+	return "/select," + explorerQuote(path)
+}
+
+// ExplorerOpenArg quotes a folder for explorer.exe. A trailing backslash
+// would escape the closing quote (`C:\`), so it is doubled.
+func ExplorerOpenArg(path string) string {
+	return explorerQuote(path)
+}
+
+func explorerQuote(path string) string {
+	path = strings.ReplaceAll(path, `"`, "")
+	if strings.HasSuffix(path, `\`) {
+		path += `\`
+	}
+	return `"` + path + `"`
 }
 
 func joinArgs(args []string, quote func(string) string) string {

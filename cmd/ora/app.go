@@ -35,9 +35,9 @@ func (a *app) debug(format string, args ...any) {
 	}
 }
 
-// loadIndex returns the cached index, rebuilding it per the cache rules in
-// PLAN.md: no cache or forceFull -> full build; stale -> sources 1-3 with
-// Everything entries carried over.
+// loadIndex returns the cached index. No cache or a forced rebuild scans
+// every source. A stale cache rebuilds Start Menu, registry and Store apps
+// and keeps the Everything entries.
 func (a *app) loadIndex(forceFull bool) (*index.Index, error) {
 	if !forceFull {
 		ix, err := index.Load()

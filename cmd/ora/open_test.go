@@ -28,6 +28,16 @@ func TestOpenableFile(t *testing.T) {
 	if _, ok := openableFile(dir); ok {
 		t.Fatal("directory")
 	}
+	got, ok = openableDir(dir)
+	if !ok || got != dir {
+		t.Fatalf("dir: ok=%v got=%q", ok, got)
+	}
+	if _, ok := openableDir(txt); ok {
+		t.Fatal("file is not a folder")
+	}
+	if _, ok := openableDir("discord"); ok {
+		t.Fatal("bare name must stay a query")
+	}
 }
 
 func TestOpenCommandFlag(t *testing.T) {

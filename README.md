@@ -16,11 +16,11 @@ ora f docs notes       # extra words may match the folder
 ora alias vsc "Visual Studio Code"  # then `ora vsc` hits that app
 ora open discord       # show that program in Explorer, don't launch it
 ora open -f notes.cfg  # show that file in its folder
+ora open E:\Tools      # open that folder
+ora open -f Tools      # a folder match is opened, a file match is selected
 ```
 
 A clear winner launches immediately. Several close matches open a picker: ↑/↓ move, Enter launches, `1`–`8` pick a row, Esc cancels. With no terminal, ora prints the rows and exits `2`.
-
-Design, scoring rules and trade-offs: [PLAN.md](PLAN.md).
 
 ## Install
 
@@ -53,7 +53,7 @@ Open a new window after that. `ora completion` also prints bash, zsh, and fish.
 | `ora list` | print the index; in a terminal paged 20 rows at a time (←/→, Home/End, q), piped output is the full list |
 | `ora which <query>` | show winner, score, target and decision without launching |
 | `ora alias <shortcut> <official name>` | add an alias to `config.yaml` |
-| `ora open <query...>` | show the match in Explorer instead of launching it; `-f` searches files like `ora file` |
+| `ora open <query...>` | show the match in Explorer instead of launching it; a typed folder is opened; `-f` searches files and folders |
 
 Flags before the query: `--refresh`, `--min-score`, `-v`.
 
@@ -61,7 +61,7 @@ Exit codes: `0` launched, `1` no match / cancelled, `2` ambiguous without TTY, `
 
 ## Files
 
-- `%APPDATA%\ora\config.yaml` – settings and aliases (defaults in PLAN.md)
+- `%APPDATA%\ora\config.yaml` – settings and aliases. A missing file uses the built-in defaults |
 - `%APPDATA%\ora\recent.json` – last 20 app launches (files are not recorded)
 - `%LOCALAPPDATA%\ora\index.json` – index cache, 24 h TTL
 

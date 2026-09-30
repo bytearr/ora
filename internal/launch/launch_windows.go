@@ -87,8 +87,17 @@ func (s Shell) Launch(e index.Entry, extra []string) error {
 // explorer.exe returns as soon as the existing shell picks up the request,
 // so the exit status is ignored, same as the Store-app fallback.
 func Reveal(path string) error {
+	return startExplorer(ExplorerSelectArg(path))
+}
+
+// OpenDir opens a folder in Explorer. It does not highlight a file inside it.
+func OpenDir(path string) error {
+	return startExplorer(ExplorerOpenArg(path))
+}
+
+func startExplorer(args string) error {
 	cmd := exec.Command("explorer.exe")
-	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: "explorer.exe " + ExplorerSelectArg(path)}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: "explorer.exe " + args}
 	if err := cmd.Start(); err != nil {
 		return err
 	}

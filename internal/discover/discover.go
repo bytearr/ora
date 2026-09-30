@@ -153,7 +153,20 @@ func EverythingSearch(ev config.Everything) string {
 // query word quoted so Everything operators in it stay literal, plus the
 // directory excludes (not Program Files: documents may live there).
 func FileSearch(ev config.Everything, query string) string {
-	parts := []string{"file:"}
+	return liveSearch(ev, query, true)
+}
+
+// OpenSearch is FileSearch without the files-only limit, so `ora open -f`
+// can match a folder name as well as a file name.
+func OpenSearch(ev config.Everything, query string) string {
+	return liveSearch(ev, query, false)
+}
+
+func liveSearch(ev config.Everything, query string, filesOnly bool) string {
+	var parts []string
+	if filesOnly {
+		parts = append(parts, "file:")
+	}
 	for _, w := range strings.Fields(query) {
 		if w = strings.ReplaceAll(w, `"`, ""); w != "" {
 			parts = append(parts, `"`+w+`"`)
@@ -174,6 +187,17 @@ func FileEntry(p string) index.Entry {
 	return index.Entry{
 		Name:   match.SplitWords(filepath.Base(p)),
 		Kind:   index.KindFile,
+		Source: index.SourceSearch,
+		Target: p,
+		Parent: filepath.Base(filepath.Dir(p)),
+	}
+}
+
+// DirEntry builds the entry for a folder Explorer should open.
+func DirEntry(p string) index.Entry {
+	return index.Entry{
+		Name:   match.SplitWords(filepath.Base(p)),
+		Kind:   index.KindFolder,
 		Source: index.SourceSearch,
 		Target: p,
 		Parent: filepath.Base(filepath.Dir(p)),

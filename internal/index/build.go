@@ -85,7 +85,7 @@ func IsJunk(e Entry, ignore []string) bool {
 }
 
 // Merge filters junk and dedupes groups given in source priority order.
-// Dedupe stages: AUMID, resolved path, normalized name (see PLAN.md).
+// Dedupe stages: AUMID, then resolved path, then normalized name.
 func Merge(groups [][]Entry, ignore []string) []Entry {
 	var out []Entry
 	seenAUMID := map[string]bool{}

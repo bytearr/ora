@@ -20,6 +20,7 @@ const (
 	KindStore    Kind = "store"    // packaged app, launched by AUMID
 	KindPortable Kind = "portable" // file found by Everything
 	KindFile     Kind = "file"     // any file opened with its default app, never cached
+	KindFolder   Kind = "folder"   // a directory opened in Explorer, never cached
 )
 
 type Source string

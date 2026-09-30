@@ -118,25 +118,42 @@ func openCmd(a *app) *cobra.Command {
 			return a.runOpen(strings.Join(args, " "), file)
 		},
 	}
-	cmd.Flags().BoolVarP(&file, "file", "f", false, "search files the same way as 'ora file', not programs")
+	cmd.Flags().BoolVarP(&file, "file", "f", false, "search files and folders, not programs")
 	return cmd
 }
 
 // openableFile reports a path the user typed, so ora can open that file
 // with its default app. A bare name with no extension stays a program query.
 func openableFile(q string) (string, bool) {
-	if q == "" || (!strings.ContainsAny(q, `\/`) && !strings.Contains(q, ".")) {
+	p, st, ok := existingPath(q)
+	if !ok || st.IsDir() {
 		return "", false
 	}
-	st, err := os.Stat(q)
-	if err != nil || st.IsDir() {
+	return p, true
+}
+
+func openableDir(q string) (string, bool) {
+	p, st, ok := existingPath(q)
+	if !ok || !st.IsDir() {
 		return "", false
+	}
+	return p, true
+}
+
+// existingPath accepts a typed path. A bare name with no extension stays a query.
+func existingPath(q string) (string, os.FileInfo, bool) {
+	if q == "" || (!strings.ContainsAny(q, `\/`) && !strings.Contains(q, ".")) {
+		return "", nil, false
+	}
+	st, err := os.Stat(q)
+	if err != nil {
+		return "", nil, false
 	}
 	abs, err := filepath.Abs(q)
 	if err != nil {
-		return q, true
+		return q, st, true
 	}
-	return abs, true
+	return abs, st, true
 }
 
 // splitQuery implements the argument rules: with a literal "--" the words
@@ -175,12 +192,15 @@ func (a *app) runOpen(q string, file bool) error {
 	if p, ok := openableFile(q); ok {
 		return a.reveal(fileEntry(p))
 	}
+	if p, ok := openableDir(q); ok {
+		return a.reveal(discover.DirEntry(p))
+	}
 	label := func(e index.Entry, score float64) string {
 		return fmt.Sprintf("%-40s %-9s %.2f  %s", e.Name, e.Kind, score, describeTarget(e))
 	}
 	act := func(e index.Entry) error { return a.reveal(e) }
 	if file {
-		ix, rs, err := a.rankFiles(q)
+		ix, rs, err := a.rankPaths(q, true)
 		if err != nil {
 			return err
 		}
@@ -202,7 +222,13 @@ func (a *app) reveal(e index.Entry) error {
 		return &exitErr{code: exitNoMatch, msg: fmt.Sprintf("%s has no file path", e.Name)}
 	}
 	a.debug("open: %s %s -> %s", e.Kind, e.Name, p)
-	if err := launch.Reveal(p); err != nil {
+	var err error
+	if e.Kind == index.KindFolder {
+		err = launch.OpenDir(p)
+	} else {
+		err = launch.Reveal(p)
+	}
+	if err != nil {
 		return &exitErr{code: exitLaunch, msg: fmt.Sprintf("open %q failed: %v", e.Name, err)}
 	}
 	return nil
@@ -239,8 +265,19 @@ func (a *app) runFile(q string, which bool) error {
 }
 
 func (a *app) rankFiles(q string) (*index.Index, []match.Result, error) {
+	return a.rankPaths(q, false)
+}
+
+func (a *app) rankPaths(q string, folders bool) (*index.Index, []match.Result, error) {
 	start := time.Now()
-	paths, total, err := discover.SearchFiles(a.cfg.Everything, q, fileSearchLimit, a.warn)
+	var paths []string
+	var total int
+	var err error
+	if folders {
+		paths, total, err = discover.SearchOpen(a.cfg.Everything, q, fileSearchLimit, a.warn)
+	} else {
+		paths, total, err = discover.SearchFiles(a.cfg.Everything, q, fileSearchLimit, a.warn)
+	}
 	if errors.Is(err, discover.ErrEverythingNotRunning) {
 		return nil, nil, fmt.Errorf("file search needs Everything (https://www.voidtools.com)")
 	}
@@ -252,12 +289,24 @@ func (a *app) rankFiles(q string) (*index.Index, []match.Result, error) {
 		a.warn("%d files match, only the first %d (by name) are ranked; add a word to narrow it", total, len(paths))
 	}
 	if len(paths) == 0 {
-		return nil, nil, &exitErr{code: exitNoMatch, msg: fmt.Sprintf("no file matches %q", q)}
+		what := "file"
+		if folders {
+			what = "file or folder"
+		}
+		return nil, nil, &exitErr{code: exitNoMatch, msg: fmt.Sprintf("no %s matches %q", what, q)}
 	}
 	ix := &index.Index{Entries: make([]index.Entry, len(paths))}
 	cs := make([]match.Candidate, len(paths))
 	for i, p := range paths {
-		ix.Entries[i] = discover.FileEntry(p)
+		if folders {
+			if st, err := os.Stat(p); err == nil && st.IsDir() {
+				ix.Entries[i] = discover.DirEntry(p)
+			} else {
+				ix.Entries[i] = discover.FileEntry(p)
+			}
+		} else {
+			ix.Entries[i] = discover.FileEntry(p)
+		}
 		cs[i] = match.Candidate{Name: ix.Entries[i].Name, Parent: ix.Entries[i].Parent}
 	}
 	return ix, match.Rank(q, cs), nil

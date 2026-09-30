@@ -74,4 +74,10 @@ func TestExplorerSelectArg(t *testing.T) {
 	if got := ExplorerSelectArg(`C:\a"b\app.exe`); got != `/select,"C:\ab\app.exe"` {
 		t.Errorf("quote: %s", got)
 	}
+	if got := ExplorerOpenArg(`E:\Tools`); got != `"E:\Tools"` {
+		t.Errorf("folder: %s", got)
+	}
+	if got := ExplorerOpenArg(`C:\`); got != `"C:\\"` {
+		t.Errorf("drive root: %s", got)
+	}
 }

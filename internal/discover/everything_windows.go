@@ -144,7 +144,7 @@ func findEverything() uintptr {
 }
 
 // queryIPC runs one EVERYTHING_IPC_QUERY2 against the running Everything.
-func queryIPC(search string, maxResults, searchFlags uint32) ([]string, int, error) {
+func queryIPC(search string, maxResults, searchFlags uint32, keepFolders bool) ([]string, int, error) {
 	target := findEverything()
 	if target == 0 {
 		return nil, 0, ErrEverythingNotRunning
@@ -159,14 +159,14 @@ func queryIPC(search string, maxResults, searchFlags uint32) ([]string, int, err
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
-		p, t, err := queryOnThread(target, search, maxResults, searchFlags)
+		p, t, err := queryOnThread(target, search, maxResults, searchFlags, keepFolders)
 		done <- result{p, t, err}
 	}()
 	r := <-done
 	return r.paths, r.total, r.err
 }
 
-func queryOnThread(target uintptr, search string, maxResults, searchFlags uint32) ([]string, int, error) {
+func queryOnThread(target uintptr, search string, maxResults, searchFlags uint32, keepFolders bool) ([]string, int, error) {
 	if err := registerClass(); err != nil {
 		return nil, 0, err
 	}
@@ -204,7 +204,7 @@ func queryOnThread(target uintptr, search string, maxResults, searchFlags uint32
 	if !ipcDone {
 		return nil, 0, fmt.Errorf("no reply from Everything within %d s", ipcTimeoutMillis/1000)
 	}
-	return parseList2(ipcReply)
+	return parseList2(ipcReply, keepFolders)
 }
 
 func findES() (string, error) {
@@ -233,7 +233,7 @@ func findES() (string, error) {
 
 // queryES is the fallback when IPC fails. The command line is passed raw so
 // the quoted regex terms reach es.exe unchanged.
-func queryES(search string, maxResults int, matchPath bool) ([]string, int, error) {
+func queryES(search string, maxResults int, matchPath, keepFolders bool) ([]string, int, error) {
 	es, err := findES()
 	if err != nil {
 		return nil, 0, err
@@ -279,5 +279,20 @@ func queryES(search string, maxResults int, matchPath bool) ([]string, int, erro
 			total = n
 		}
 	}
+	if !keepFolders {
+		paths = dropDirs(paths)
+	}
 	return paths, total, nil
+}
+
+func dropDirs(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		st, err := os.Stat(p)
+		if err == nil && st.IsDir() {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
