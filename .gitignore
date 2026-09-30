@@ -1,0 +1,13 @@
+*.exe
+*.dll
+*.so
+*.test
+*.out
+
+/bin/
+/dist/
+
+go.work
+go.work.sum
+
+PLAN.md
