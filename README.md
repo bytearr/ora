@@ -22,12 +22,28 @@ ora open -f Tools      # a folder match is opened, a file match is selected
 
 A clear winner launches immediately. Several close matches open a picker: ↑/↓ move, Enter launches, `1`–`8` pick a row, Esc cancels. With no terminal, ora prints the rows and exits `2`.
 
+## Window
+
+`ora` without arguments opens the search window and returns; `ora --help` stays the help. The window keeps running in the background: the hotkey shows it, Esc hides it, Ctrl+Q quits it. The default hotkey is `LWin & LAlt` (left Win plus left Alt, nothing else).
+
+`%APPDATA%\ora\config.yaml` takes four window settings, read once when the window starts:
+
+```yaml
+settings:
+  hotkey: "LWin & LAlt"   # AutoHotkey v2 notation, e.g. "^!Space" or "<#a"
+  monitor: primary        # or cursor
+  theme: dark             # or light
+  autostart: false        # true starts the window hidden when you sign in
+```
+
+`autostart: true` keeps an `ora` entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that runs `ora --autostart` through `conhost.exe --headless`, so no console flashes at sign-in. Every window start rewrites it if `ora.exe` moved; `false` removes it.
+
 ## Install
 
 Windows 10/11 (amd64, arm64 or 386). Building requires Go 1.26+.
 
 ```powershell
-go install ./cmd/ora     # -> %USERPROFILE%\go\bin\ora.exe
+go install .             # -> %USERPROFILE%\go\bin\ora.exe
 ora index                # first full index (Start Menu, registry, AppsFolder, Everything)
 ```
 
@@ -61,9 +77,10 @@ Exit codes: `0` launched, `1` no match / cancelled, `2` ambiguous without TTY, `
 
 ## Files
 
-- `%APPDATA%\ora\config.yaml` – settings and aliases. A missing file uses the built-in defaults |
-- `%APPDATA%\ora\recent.json` – last 20 app launches (files are not recorded)
+- `%APPDATA%\ora\config.yaml` – settings and aliases. A missing file uses the built-in defaults; the first window start writes it with the window settings
+- `%APPDATA%\ora\recent.json` – last 20 launches (the CLI records apps, the window also files and folders)
 - `%LOCALAPPDATA%\ora\index.json` – index cache, 24 h TTL
+- `%LOCALAPPDATA%\ora\gui.log` – window warnings and errors
 
 ## License
 
