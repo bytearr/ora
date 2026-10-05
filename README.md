@@ -2,6 +2,8 @@
 
 Start a Windows app by a short, possibly misspelled name, or open any file by name.
 
+![ora opening Notepad](docs/demo.gif)
+
 ```text
 ora discord            # launch
 ora discrod            # typo, still Discord
