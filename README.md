@@ -2,7 +2,10 @@
 
 Start a Windows app by a short, possibly misspelled name, or open any file by name.
 
-![ora opening Notepad](docs/demo.gif)
+<p align="center">
+  <img alt="ora opening Notepad" src="docs/demo.gif" width="720">
+</p>
+<br>
 
 ```text
 ora discord            # launch
