@@ -2,10 +2,11 @@
 
 Start a Windows app by a short, possibly misspelled name, or open any file by name.
 
-<p align="center">
-  <img alt="ora opening Notepad" src="docs/demo.gif" width="720">
-</p>
-<br>
+![ora opening Notepad](docs/demo.gif)
+
+The same program is the search window and the terminal command. Left Win and left Alt open the window. Enter launches, Esc hides it.
+
+## Examples
 
 ```text
 ora discord            # launch
