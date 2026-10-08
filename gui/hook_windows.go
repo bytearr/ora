@@ -130,9 +130,10 @@ func (s *hotkeyState) combo(vk uint32, down, was bool) {
 	if !a && !b {
 		return
 	}
+	// clean stays set: tapping the released key again while the other is
+	// held fires again.
 	if s.armed.Load() {
 		s.armed.Store(false)
-		s.clean.Store(false)
 		s.trigger()
 	}
 	if a {

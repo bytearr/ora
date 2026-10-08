@@ -42,7 +42,7 @@ settings:
   autostart: false        # true starts the window hidden when you sign in
 ```
 
-`autostart: true` keeps an `ora` entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that runs `ora --autostart` through `conhost.exe --headless`, so no console flashes at sign-in. Every window start rewrites it if `ora.exe` moved; `false` removes it.
+`autostart: true` keeps an `ora` entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that runs `ora --autostart` through `conhost.exe --headless`, so no console flashes at sign-in. The window checks it at start and each time it opens, so a change needs no restart; it rewrites the entry if `ora.exe` moved, and `false` removes it.
 
 ## Install
 

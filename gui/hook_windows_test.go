@@ -93,12 +93,20 @@ func TestComboRightAltAndAltGr(t *testing.T) {
 	}
 }
 
-func TestComboOnceAndAgain(t *testing.T) {
+func TestComboTapAgain(t *testing.T) {
 	f, _ := run(t, config.DefaultHotkey,
-		dn(lwin), dn(lalt), up(lalt), dn(lalt), up(lalt), up(lwin),
+		dn(lwin), dn(lalt), up(lalt), dn(lalt), dn(lalt), up(lalt), up(lwin),
 		dn(lwin), dn(lalt), up(lwin), up(lalt))
-	if !eq(f, 2, 8) {
-		t.Errorf("a second tap while Win stays down must not fire; fires %v", f)
+	if !eq(f, 2, 5, 9) {
+		t.Errorf("each Alt tap while Win stays down fires once, repeat does not; fires %v", f)
+	}
+	f, m := run(t, config.DefaultHotkey, dn(lalt), dn(lwin), up(lwin), dn(lwin), up(lwin), up(lalt))
+	if !eq(f, 2, 4) || !eq(m, 2, 4) {
+		t.Errorf("Win taps while Alt stays down: fires %v masks %v", f, m)
+	}
+	f, _ = run(t, config.DefaultHotkey, dn(lwin), dn(lalt), up(lalt), dn(tab), up(tab), dn(lalt), up(lalt), up(lwin))
+	if !eq(f, 2) {
+		t.Errorf("another key between the taps cancels: fires %v", f)
 	}
 }
 

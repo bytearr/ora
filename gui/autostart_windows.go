@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/spf13/viper"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+
+	"ora/core/config"
 )
 
 // AutostartArg is the one argument of the Run entry: start the window
@@ -25,6 +28,21 @@ const (
 // undocumented, conhost has it since Windows 10 1809.
 func runCommand(systemDir, exe string) string {
 	return fmt.Sprintf(`"%s" --headless "%s" %s`, filepath.Join(systemDir, "conhost.exe"), exe, AutostartArg)
+}
+
+// refreshAutostart re-reads settings.autostart, the one key read again
+// while the window runs: otherwise switching it on needs a window restart
+// nobody thinks of, and the entry is never written. Runs off the UI thread.
+func (w *window) refreshAutostart() {
+	defer w.recoverWorker("autostart")
+	cfg, err := config.Load(viper.New())
+	if err != nil {
+		w.log.printf("autostart: config: %v", err)
+		return
+	}
+	if err := syncAutostart(cfg.Settings.Autostart); err != nil {
+		w.log.printf("autostart: %v", err)
+	}
 }
 
 // syncAutostart makes the Run entry match on: written or rewritten when

@@ -3,6 +3,7 @@ package gui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"sync/atomic"
@@ -819,6 +820,7 @@ func (w *window) show() {
 	w.reset()
 	w.requestRecent()
 	w.present()
+	go w.refreshAutostart()
 }
 
 // present places the window on the configured monitor and brings it to
@@ -831,7 +833,30 @@ func (w *window) present() {
 	procSetWindowPos.Call(w.hwnd, hwndTopmost, 0, 0, 0, 0, swpNoSize|swpNoMove|swpShowWindow)
 	procShowWindow.Call(w.hwnd, swShow)
 	bringToFront(w.hwnd)
+	if fg, _, _ := procGetForegroundWindow.Call(); fg != w.hwnd {
+		w.log.printf("window shown without the foreground; it belongs to %s", windowOwner(fg))
+	}
 	procSetFocus.Call(w.edit)
+}
+
+// windowOwner names the process of hwnd for the log.
+func windowOwner(hwnd uintptr) string {
+	if hwnd == 0 {
+		return "no window"
+	}
+	var pid uint32
+	procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return fmt.Sprintf("pid %d", pid)
+	}
+	defer windows.CloseHandle(h)
+	buf := make([]uint16, windows.MAX_PATH)
+	n := uint32(len(buf))
+	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &n); err != nil {
+		return fmt.Sprintf("pid %d", pid)
+	}
+	return fmt.Sprintf("%s (pid %d)", filepath.Base(windows.UTF16ToString(buf[:n])), pid)
 }
 
 func (w *window) hide() {
@@ -840,8 +865,10 @@ func (w *window) hide() {
 	w.status = nil
 }
 
+// toggle hides the window only when it has the focus. Visible behind
+// another app, or shown without the foreground, the hotkey brings it up.
 func (w *window) toggle() {
-	if w.visible() {
+	if fg, _, _ := procGetForegroundWindow.Call(); w.visible() && fg == w.hwnd {
 		w.hide()
 		return
 	}
