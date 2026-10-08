@@ -81,6 +81,8 @@ Flags before the query: `--refresh`, `--min-score`, `-v`.
 
 Exit codes: `0` launched, `1` no match / cancelled, `2` ambiguous without TTY, `3` launch failed, `4` other error.
 
+`ora mcp` serves search, launch and reveal to AI agents over MCP on stdin/stdout. Agents search first and launch only by the id they got. Tools and setup: [docs/mcp.md](docs/mcp.md).
+
 ## Files
 
 - `%APPDATA%\ora\config.yaml` – settings and aliases. A missing file uses the built-in defaults; the first window start writes it with the window settings

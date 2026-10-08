@@ -19,6 +19,7 @@ import (
 	"ora/core/engine"
 	"ora/core/index"
 	"ora/core/match"
+	"ora/mcp"
 )
 
 // NewRoot builds the terminal command tree.
@@ -80,6 +81,14 @@ func NewRoot() *cobra.Command {
 			Short: "Print the winner, score, kind and target without launching",
 			Args:  cobra.MinimumNArgs(1),
 			RunE:  func(_ *cobra.Command, args []string) error { return a.runWhich(strings.Join(args, " ")) },
+		},
+		&cobra.Command{
+			Use:   "mcp",
+			Short: "Serve search, launch and reveal to agents over MCP on stdin/stdout",
+			Args:  cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				return mcp.Run(cmd.Context(), a.eng)
+			},
 		},
 		&cobra.Command{
 			Use:   "alias <shortcut> <official name...>",
