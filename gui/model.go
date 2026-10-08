@@ -85,11 +85,14 @@ func QueryMode(q string) Mode {
 	}
 }
 
-// Result is what the worker delivers for one generation.
+// Result is what the worker delivers for one generation. A search comes in
+// two: Partial with the programs (and a typed path) as soon as they are
+// ranked, then the full list, whose rows start with the same ones.
 type Result struct {
-	Gen  uint64
-	Rows []Row
-	Note string
+	Gen     uint64
+	Rows    []Row
+	Note    string
+	Partial bool
 }
 
 // Item is one line under the query: a row or the Show more button.
@@ -124,6 +127,7 @@ type Model struct {
 	Stale bool
 
 	pending, pendingReveal bool // Enter pressed while Stale
+	partial                bool // Rows are a Partial result of Gen
 }
 
 // SetQuery starts a new generation: results of older ones are dropped and
@@ -136,19 +140,25 @@ func (m *Model) SetQuery(q string, keep bool) Mode {
 	if !keep {
 		m.Rows, m.Note = nil, ""
 	}
-	m.Stale, m.pending = keep, false
+	m.Stale, m.pending, m.partial = keep, false, false
 	m.Sel, m.Top, m.Expanded = 0, 0, false
 	return QueryMode(q)
 }
 
 // Apply takes a worker result. A result of an older generation is
-// discarded and Apply returns false.
+// discarded and Apply returns false. An empty Partial is skipped too: the
+// old rows stay until there is something to show. The full result after a
+// shown Partial only appends rows, so the selection and scroll stay.
 func (m *Model) Apply(r Result) bool {
-	if r.Gen != m.Gen {
+	if r.Gen != m.Gen || r.Partial && len(r.Rows) == 0 {
 		return false
 	}
-	m.Rows, m.Note, m.Stale = r.Rows, r.Note, false
-	m.Sel, m.Top, m.Expanded = 0, 0, false
+	extends := m.partial && !r.Partial
+	m.Rows, m.Note, m.Stale, m.partial = r.Rows, r.Note, false, r.Partial
+	if !extends {
+		m.Sel, m.Top, m.Expanded = 0, 0, false
+	}
+	m.Sel = max(0, min(m.Sel, len(m.Items())-1))
 	return true
 }
 

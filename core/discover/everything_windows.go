@@ -144,14 +144,14 @@ func findEverything() uintptr {
 }
 
 // queryIPC runs one EVERYTHING_IPC_QUERY2 against the running Everything.
-func queryIPC(search string, maxResults, searchFlags uint32, keepFolders bool) ([]string, int, error) {
+func queryIPC(search string, maxResults, searchFlags uint32, keepFolders bool) ([]Hit, int, error) {
 	target := findEverything()
 	if target == 0 {
 		return nil, 0, ErrEverythingNotRunning
 	}
 
 	type result struct {
-		paths []string
+		paths []Hit
 		total int
 		err   error
 	}
@@ -166,7 +166,7 @@ func queryIPC(search string, maxResults, searchFlags uint32, keepFolders bool) (
 	return r.paths, r.total, r.err
 }
 
-func queryOnThread(target uintptr, search string, maxResults, searchFlags uint32, keepFolders bool) ([]string, int, error) {
+func queryOnThread(target uintptr, search string, maxResults, searchFlags uint32, keepFolders bool) ([]Hit, int, error) {
 	if err := registerClass(); err != nil {
 		return nil, 0, err
 	}
@@ -233,7 +233,7 @@ func findES() (string, error) {
 
 // queryES is the fallback when IPC fails. The command line is passed raw so
 // the quoted regex terms reach es.exe unchanged.
-func queryES(search string, maxResults int, matchPath, keepFolders bool) ([]string, int, error) {
+func queryES(search string, maxResults int, matchPath, keepFolders bool) ([]Hit, int, error) {
 	es, err := findES()
 	if err != nil {
 		return nil, 0, err
@@ -279,20 +279,20 @@ func queryES(search string, maxResults int, matchPath, keepFolders bool) ([]stri
 			total = n
 		}
 	}
-	if !keepFolders {
-		paths = dropDirs(paths)
-	}
-	return paths, total, nil
+	return statHits(paths, keepFolders), total, nil
 }
 
-func dropDirs(paths []string) []string {
-	out := make([]string, 0, len(paths))
+// statHits marks folders for the es.exe fallback, whose text export has no
+// folder flag, and drops them unless keepFolders.
+func statHits(paths []string, keepFolders bool) []Hit {
+	out := make([]Hit, 0, len(paths))
 	for _, p := range paths {
 		st, err := os.Stat(p)
-		if err == nil && st.IsDir() {
+		dir := err == nil && st.IsDir()
+		if dir && !keepFolders {
 			continue
 		}
-		out = append(out, p)
+		out = append(out, Hit{Path: p, Dir: dir})
 	}
 	return out
 }

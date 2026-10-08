@@ -33,6 +33,34 @@ type Candidate struct {
 	Generic  bool     // stem occurs 3+ times among portable entries
 	Recent   bool     // in the recent-launch list
 	Aliases  []string // alias keys that point to this candidate
+
+	prep *prepared // set by Prepare
+}
+
+// prepared holds the normalized forms scoreCandidate would otherwise build
+// for every query.
+type prepared struct {
+	name, parent, parentName, nameParent name
+	aliases                              []name
+}
+
+// Prepare normalizes the names of cs once, for ranking the same candidates
+// against many queries. Name, Parent and Aliases must not change after it;
+// Recent may.
+func Prepare(cs []Candidate) {
+	for i := range cs {
+		c := &cs[i]
+		p := &prepared{name: newName(c.Name)}
+		if c.Parent != "" {
+			p.parent = newName(c.Parent)
+			p.parentName = newName(c.Parent + " " + c.Name)
+			p.nameParent = newName(c.Name + " " + c.Parent)
+		}
+		for _, a := range c.Aliases {
+			p.aliases = append(p.aliases, newName(a))
+		}
+		c.prep = p
+	}
 }
 
 type Result struct {
@@ -86,7 +114,13 @@ func scoreCandidate(q query, c Candidate) score {
 	if q.compact == "" {
 		return score{}
 	}
-	best := scoreName(q, newName(c.Name))
+	p := c.prep
+	if p == nil {
+		one := []Candidate{c}
+		Prepare(one)
+		p = one[0].prep
+	}
+	best := scoreName(q, p.name)
 	if c.Portable && best.v < ScoreExact {
 		best.v *= PortablePenalty
 	}
@@ -95,20 +129,21 @@ func scoreCandidate(q query, c Candidate) score {
 	}
 
 	if c.Parent != "" {
-		p := newName(c.Parent)
-		for _, t := range append([]string{p.compact}, p.tokens...) {
+		if p.parent.compact == q.norm || p.parent.compact == q.compact {
+			best = better(best, score{v: ScoreParentToken})
+		}
+		for _, t := range p.parent.tokens {
 			if t == q.norm || t == q.compact {
 				best = better(best, score{v: ScoreParentToken})
 			}
 		}
 		if len(q.tokens) >= 2 {
-			best = better(best, scoreName(q, newName(c.Parent+" "+c.Name)))
-			best = better(best, scoreName(q, newName(c.Name+" "+c.Parent)))
+			best = better(best, scoreName(q, p.parentName))
+			best = better(best, scoreName(q, p.nameParent))
 		}
 	}
 
-	for _, a := range c.Aliases {
-		an := newName(a)
+	for _, an := range p.aliases {
 		if an.compact == "" {
 			continue
 		}

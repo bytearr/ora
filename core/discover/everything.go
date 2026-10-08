@@ -14,6 +14,21 @@ import (
 
 var ErrEverythingNotRunning = errors.New("Everything is not running")
 
+// Hit is one Everything result. Dir comes with the reply, so callers need
+// no os.Stat per path.
+type Hit struct {
+	Path string
+	Dir  bool
+}
+
+func hitPaths(hits []Hit) []string {
+	out := make([]string, len(hits))
+	for i, h := range hits {
+		out[i] = h.Path
+	}
+	return out
+}
+
 type Everything struct {
 	Cfg     config.Everything
 	Exclude []*regexp.Regexp // client-side re-check, including Program Files
@@ -23,10 +38,11 @@ func (Everything) Name() index.Source { return index.SourceEverything }
 
 func (e Everything) Discover(report Reporter) ([]index.Entry, error) {
 	limit := e.Cfg.MaxResults
-	paths, total, err := runQuery(e.Cfg, EverythingSearch(e.Cfg), limit, false, false, report)
+	hits, total, err := runQuery(e.Cfg, EverythingSearch(e.Cfg), limit, false, false, report)
 	if err != nil {
 		return nil, err
 	}
+	paths := hitPaths(hits)
 	if total > len(paths) && len(paths) >= limit {
 		report("everything: WARNING cap hit: %d files match, only %d indexed. Tighten exclude_regex or set include_regex.", total, len(paths))
 	}
@@ -50,7 +66,7 @@ func (e Everything) Discover(report Reporter) ([]index.Entry, error) {
 
 // runQuery asks the running Everything over IPC, starts it first when it is
 // not running and autostart is on, and falls back to es.exe if IPC fails.
-func runQuery(ev config.Everything, search string, limit int, matchPath, keepFolders bool, report Reporter) ([]string, int, error) {
+func runQuery(ev config.Everything, search string, limit int, matchPath, keepFolders bool, report Reporter) ([]Hit, int, error) {
 	var flags uint32
 	if matchPath {
 		flags = ipcMatchPath
@@ -80,15 +96,17 @@ func runQuery(ev config.Everything, search string, limit int, matchPath, keepFol
 // occur in the file name; if nothing matches and there are several words,
 // the words may also match folder names. Directory excludes apply.
 func SearchFiles(ev config.Everything, query string, limit int, report Reporter) ([]string, int, error) {
-	return searchPaths(ev, query, limit, false, report)
+	hits, total, err := searchPaths(ev, query, limit, false, report)
+	return hitPaths(hits), total, err
 }
 
-// SearchOpen is the live search behind `ora open -f`: files and folders.
-func SearchOpen(ev config.Everything, query string, limit int, report Reporter) ([]string, int, error) {
+// SearchOpen is the live search behind `ora open -f` and the window: files
+// and folders.
+func SearchOpen(ev config.Everything, query string, limit int, report Reporter) ([]Hit, int, error) {
 	return searchPaths(ev, query, limit, true, report)
 }
 
-func searchPaths(ev config.Everything, query string, limit int, keepFolders bool, report Reporter) ([]string, int, error) {
+func searchPaths(ev config.Everything, query string, limit int, keepFolders bool, report Reporter) ([]Hit, int, error) {
 	excl, err := ExcludeRegexps(ev, false)
 	if err != nil {
 		return nil, 0, err
@@ -105,9 +123,9 @@ func searchPaths(ev config.Everything, query string, limit int, keepFolders bool
 		return nil, 0, err
 	}
 	out := paths[:0]
-	for _, p := range paths {
-		if !matchesAny(p, excl) {
-			out = append(out, p)
+	for _, h := range paths {
+		if !matchesAny(h.Path, excl) {
+			out = append(out, h)
 		}
 	}
 	return out, total, nil
@@ -151,8 +169,8 @@ func buildQuery2(replyHwnd, replyID, searchFlags, maxResults uint32, search stri
 }
 
 // parseList2 decodes an EVERYTHING_IPC_LIST2 reply that carries only
-// FULL_PATH_AND_NAME. Returns file paths and the total match count.
-func parseList2(b []byte, keepFolders bool) ([]string, int, error) {
+// FULL_PATH_AND_NAME. Returns the hits and the total match count.
+func parseList2(b []byte, keepFolders bool) ([]Hit, int, error) {
 	if len(b) < list2HeaderSize {
 		return nil, 0, errors.New("everything reply too short")
 	}
@@ -165,7 +183,7 @@ func parseList2(b []byte, keepFolders bool) ([]string, int, error) {
 	if list2HeaderSize+num*item2Size > len(b) {
 		return nil, total, errors.New("everything reply truncated (items)")
 	}
-	paths := make([]string, 0, num)
+	paths := make([]Hit, 0, num)
 	for i := 0; i < num; i++ {
 		it := b[list2HeaderSize+i*item2Size:]
 		flags := le.Uint32(it[0:])
@@ -184,7 +202,7 @@ func parseList2(b []byte, keepFolders bool) ([]string, int, error) {
 		for j := range u {
 			u[j] = le.Uint16(b[off+4+2*j:])
 		}
-		paths = append(paths, string(utf16.Decode(u)))
+		paths = append(paths, Hit{Path: string(utf16.Decode(u)), Dir: flags&ipcItemFolder != 0})
 	}
 	return paths, total, nil
 }

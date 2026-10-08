@@ -125,6 +125,31 @@ func TestPendingRevealAndReset(t *testing.T) {
 	}
 }
 
+func TestPartialThenFull(t *testing.T) {
+	m := withRows(progs(8))
+	m.SetQuery("abc", true)
+	if m.Apply(Result{Gen: m.Gen, Partial: true}) || !m.Stale || len(m.Rows) != 8 {
+		t.Fatal("an empty partial must keep the old rows")
+	}
+	m.Activate(false)
+	if !m.Apply(Result{Gen: m.Gen, Rows: progs(2), Partial: true}) || m.Stale || len(m.Rows) != 2 {
+		t.Fatalf("partial not applied: stale %v rows %d", m.Stale, len(m.Rows))
+	}
+	if a := m.TakePending(); a.Kind != ActLaunch || a.Entry.Name != "app00" {
+		t.Fatalf("enter waits for the programs, not the files: %+v", a)
+	}
+	m.Move(1)
+	if !m.Apply(Result{Gen: m.Gen, Rows: progs(9)}) || m.Sel != 1 || m.partial {
+		t.Fatalf("full result after the partial must keep the selection: sel %d", m.Sel)
+	}
+	m.SetQuery("abcd", true)
+	m.Move(1)
+	m.Apply(Result{Gen: m.Gen, Rows: progs(9)})
+	if m.Sel != 0 {
+		t.Fatal("a full result without partial resets the selection")
+	}
+}
+
 func TestClickOnStaleRow(t *testing.T) {
 	m := withRows(progs(3))
 	m.SetQuery("abc", true)

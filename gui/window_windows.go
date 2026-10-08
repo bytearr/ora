@@ -16,6 +16,7 @@ import (
 	"ora/core/config"
 	"ora/core/engine"
 	"ora/core/index"
+	"ora/core/match"
 	"ora/core/win"
 )
 
@@ -565,17 +566,29 @@ func (w *window) searchLoop() {
 		if req.gen != w.latestGen.Load() {
 			continue
 		}
-		r := w.search(req)
-		w.results <- r
-		w.post(wmResult)
+		w.search(req)
 	}
 }
 
-func (w *window) search(req searchReq) (r Result) {
+func (w *window) deliver(r Result) {
+	w.results <- r
+	w.post(wmResult)
+}
+
+type fileResult struct {
+	ix     *index.Index
+	ranked []match.Result
+	err    error
+}
+
+// search delivers the answer to req. A text query is answered twice: the
+// programs as soon as they are ranked, the full list when Everything has
+// replied. Both searches run at the same time.
+func (w *window) search(req searchReq) {
 	defer func() {
 		if p := recover(); p != nil {
 			w.log.printf("panic in search: %v\n%s", p, debug.Stack())
-			r = Result{Gen: req.gen, Note: fmt.Sprintf("search failed: %v", p)}
+			w.deliver(Result{Gen: req.gen, Note: fmt.Sprintf("search failed: %v", p)})
 		}
 	}()
 	if req.recent {
@@ -583,15 +596,30 @@ func (w *window) search(req searchReq) (r Result) {
 		if err != nil {
 			w.log.printf("recent: %v", err)
 		}
-		return Result{Gen: req.gen, Rows: DropMissing(RecentRows(ids, req.ix, os.Stat), os.Stat)}
+		w.deliver(Result{Gen: req.gen, Rows: DropMissing(RecentRows(ids, req.ix, os.Stat), os.Stat)})
+		return
 	}
+	files := make(chan fileResult, 1)
+	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				w.log.printf("panic in file search: %v\n%s", p, debug.Stack())
+				files <- fileResult{err: fmt.Errorf("file search failed: %v", p)}
+			}
+		}()
+		ix, ranked, err := w.eng.SearchPaths(req.query, true)
+		files <- fileResult{ix, ranked, err}
+	}()
 	programs := DropMissing(ProgramRows(req.ix, w.eng.Search(req.ix, req.query)), os.Stat)
 	var typed *index.Entry
 	if e, ok := TypedPath(req.query); ok {
 		typed = &e
 	}
-	files, ranked, err := w.eng.SearchPaths(req.query, true)
-	return SearchResult(req.gen, programs, typed, files, ranked, err)
+	first := SearchResult(req.gen, programs, typed, nil, nil, nil)
+	first.Partial = true
+	w.deliver(first)
+	f := <-files
+	w.deliver(SearchResult(req.gen, programs, typed, f.ix, f.ranked, f.err))
 }
 
 func (w *window) submit(req searchReq) {

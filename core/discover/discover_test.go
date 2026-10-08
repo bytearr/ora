@@ -155,15 +155,15 @@ func TestQuery2AndList2(t *testing.T) {
 
 	reply := fakeList2(50, []string{`E:\Apps\a.exe`, `E:\Tools\ü.ahk`}, []uint32{0, 0})
 	paths, total, err := parseList2(reply, false)
-	if err != nil || total != 50 || len(paths) != 2 || paths[1] != `E:\Tools\ü.ahk` {
+	if err != nil || total != 50 || len(paths) != 2 || paths[1] != (Hit{Path: `E:\Tools\ü.ahk`}) {
 		t.Errorf("parse: %v %d %v", paths, total, err)
 	}
 	folder := fakeList2(1, []string{`E:\dir`}, []uint32{ipcItemFolder})
 	if paths, _, _ := parseList2(folder, false); len(paths) != 0 {
 		t.Errorf("folders must be skipped: %v", paths)
 	}
-	if paths, _, err := parseList2(folder, true); err != nil || len(paths) != 1 || paths[0] != `E:\dir` {
-		t.Errorf("open search must keep folders: %v %v", paths, err)
+	if paths, _, err := parseList2(folder, true); err != nil || len(paths) != 1 || paths[0] != (Hit{Path: `E:\dir`, Dir: true}) {
+		t.Errorf("open search must keep folders, marked: %v %v", paths, err)
 	}
 	if _, _, err := parseList2(reply[:len(reply)-3], false); err == nil {
 		t.Error("truncated reply must fail")

@@ -33,7 +33,11 @@ func SplitWords(s string) string {
 // Normalize lowercases, strips trademark signs and bitness markers, splits
 // words and turns punctuation into single spaces.
 func Normalize(s string) string {
-	s = bitnessRe.ReplaceAllString(s, " ")
+	// Every bitness marker has a 3, 4, 6 or 8; most names have none, and
+	// the regexp is the bulk of a program search otherwise.
+	if strings.ContainsAny(s, "3468") {
+		s = bitnessRe.ReplaceAllString(s, " ")
+	}
 	s = SplitWords(s)
 	s = strings.ToLower(s)
 	var b strings.Builder

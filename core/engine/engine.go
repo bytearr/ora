@@ -6,10 +6,10 @@ package engine
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/viper"
@@ -28,6 +28,11 @@ type Engine struct {
 	Warn WarnFunc
 	// Debug prints sources, timings and launch targets; nil is silent.
 	Debug WarnFunc
+
+	mu      sync.Mutex
+	candsIx *index.Index // index the cached candidates belong to
+	cands   []match.Candidate
+	ids     []string
 }
 
 // ErrNeedsEverything is returned by SearchPaths when Everything is not running.
@@ -140,28 +145,38 @@ func (e *Engine) discover(s discover.Source) []index.Entry {
 }
 
 // candidates maps entries to match candidates with aliases and recent flags.
+// The prepared list is built once per index; aliases are read then, so the
+// index must not change in place. Callers hold e.mu.
 func (e *Engine) candidates(ix *index.Index, recent []string) []match.Candidate {
-	aliasesFor := map[string][]string{}
-	for k, official := range e.Cfg.Aliases {
-		key := match.Compact(match.Normalize(official))
-		aliasesFor[key] = append(aliasesFor[key], k)
+	if e.candsIx != ix {
+		aliasesFor := map[string][]string{}
+		for k, official := range e.Cfg.Aliases {
+			key := match.Compact(match.Normalize(official))
+			aliasesFor[key] = append(aliasesFor[key], k)
+		}
+		e.cands = make([]match.Candidate, len(ix.Entries))
+		e.ids = make([]string, len(ix.Entries))
+		for i, en := range ix.Entries {
+			e.cands[i] = match.Candidate{
+				Name:     en.Name,
+				Parent:   en.Parent,
+				Portable: en.Source == index.SourceEverything,
+				Generic:  en.Generic,
+				Aliases:  aliasesFor[match.Compact(match.Normalize(en.Name))],
+			}
+			e.ids[i] = en.ID()
+		}
+		match.Prepare(e.cands)
+		e.candsIx = ix
 	}
 	isRecent := map[string]bool{}
 	for _, id := range recent {
 		isRecent[id] = true
 	}
-	cs := make([]match.Candidate, len(ix.Entries))
-	for i, en := range ix.Entries {
-		cs[i] = match.Candidate{
-			Name:     en.Name,
-			Parent:   en.Parent,
-			Portable: en.Source == index.SourceEverything,
-			Generic:  en.Generic,
-			Recent:   isRecent[en.ID()],
-			Aliases:  aliasesFor[match.Compact(match.Normalize(en.Name))],
-		}
+	for i := range e.cands {
+		e.cands[i].Recent = isRecent[e.ids[i]]
 	}
-	return cs
+	return e.cands
 }
 
 // Search ranks every index entry against query with aliases and the recent
@@ -171,6 +186,8 @@ func (e *Engine) Search(ix *index.Index, query string) []match.Result {
 	if err != nil {
 		e.debug("recent: %v", err)
 	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	return match.Rank(query, e.candidates(ix, recent))
 }
 
@@ -179,13 +196,17 @@ func (e *Engine) Search(ix *index.Index, query string) []match.Result {
 // empty result, not an error.
 func (e *Engine) SearchPaths(query string, folders bool) (*index.Index, []match.Result, error) {
 	start := time.Now()
-	var paths []string
+	var hits []discover.Hit
 	var total int
 	var err error
 	if folders {
-		paths, total, err = discover.SearchOpen(e.Cfg.Everything, query, fileSearchLimit, e.warn)
+		hits, total, err = discover.SearchOpen(e.Cfg.Everything, query, fileSearchLimit, e.warn)
 	} else {
+		var paths []string
 		paths, total, err = discover.SearchFiles(e.Cfg.Everything, query, fileSearchLimit, e.warn)
+		for _, p := range paths {
+			hits = append(hits, discover.Hit{Path: p})
+		}
 	}
 	if errors.Is(err, discover.ErrEverythingNotRunning) {
 		return nil, nil, ErrNeedsEverything
@@ -193,21 +214,17 @@ func (e *Engine) SearchPaths(query string, folders bool) (*index.Index, []match.
 	if err != nil {
 		return nil, nil, fmt.Errorf("everything: %w", err)
 	}
-	e.debug("file search: %d of %d results in %s", len(paths), total, time.Since(start).Round(time.Millisecond))
-	if total > len(paths) && len(paths) >= fileSearchLimit {
-		e.warn("%d files match, only the first %d (by name) are ranked; add a word to narrow it", total, len(paths))
+	e.debug("file search: %d of %d results in %s", len(hits), total, time.Since(start).Round(time.Millisecond))
+	if total > len(hits) && len(hits) >= fileSearchLimit {
+		e.warn("%d files match, only the first %d (by name) are ranked; add a word to narrow it", total, len(hits))
 	}
-	ix := &index.Index{Entries: make([]index.Entry, len(paths))}
-	cs := make([]match.Candidate, len(paths))
-	for i, p := range paths {
-		if folders {
-			if st, err := os.Stat(p); err == nil && st.IsDir() {
-				ix.Entries[i] = discover.DirEntry(p)
-			} else {
-				ix.Entries[i] = discover.FileEntry(p)
-			}
+	ix := &index.Index{Entries: make([]index.Entry, len(hits))}
+	cs := make([]match.Candidate, len(hits))
+	for i, h := range hits {
+		if h.Dir {
+			ix.Entries[i] = discover.DirEntry(h.Path)
 		} else {
-			ix.Entries[i] = discover.FileEntry(p)
+			ix.Entries[i] = discover.FileEntry(h.Path)
 		}
 		cs[i] = match.Candidate{Name: ix.Entries[i].Name, Parent: ix.Entries[i].Parent}
 	}
