@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -311,6 +312,20 @@ type searchReq struct {
 	ix     *index.Index
 }
 
+// fileReq is one Everything search for the window. programs carries the
+// program rows of the same query; it is closed without a value if ranking
+// them failed.
+type fileReq struct {
+	gen      uint64
+	query    string
+	programs chan programRows
+}
+
+type programRows struct {
+	rows  []Row
+	typed *index.Entry
+}
+
 type iconReq struct {
 	key   string
 	entry index.Entry
@@ -348,6 +363,9 @@ type window struct {
 	startHidden bool // autostart: wait for the hotkey
 
 	reqs     chan searchReq
+	fileMu   sync.Mutex
+	fileNext *fileReq      // the one pending file search; a newer query replaces it
+	fileWake chan struct{} // wakes fileLoop when fileNext is set
 	results  chan Result
 	indexed  chan indexDone
 	launched chan error
@@ -534,6 +552,7 @@ func (w *window) textHeight(font uintptr) int32 {
 
 func (w *window) startWorkers() {
 	w.reqs = make(chan searchReq, 1)
+	w.fileWake = make(chan struct{}, 1)
 	w.results = make(chan Result, 8)
 	w.indexed = make(chan indexDone, 1)
 	w.launched = make(chan error, 1)
@@ -543,6 +562,7 @@ func (w *window) startWorkers() {
 	w.asked = map[string]bool{}
 	go w.loadIndex()
 	go w.searchLoop()
+	go w.fileLoop()
 	go w.iconLoop()
 }
 
@@ -575,17 +595,10 @@ func (w *window) deliver(r Result) {
 	w.post(wmResult)
 }
 
-type fileResult struct {
-	ix     *index.Index
-	ranked []match.Result
-	err    error
-}
-
 // search delivers the answer to req. A text query is answered twice: the
 // programs as soon as they are ranked, the full list when Everything has
-// replied. Both searches run at the same time, and search returns after the
-// programs so the next query need not wait for Everything; a file result
-// that is no longer the latest query is dropped.
+// replied. The file search is handed to fileLoop before ranking, so both
+// run at the same time and search never waits for Everything.
 func (w *window) search(req searchReq) {
 	defer func() {
 		if p := recover(); p != nil {
@@ -601,33 +614,70 @@ func (w *window) search(req searchReq) {
 		w.deliver(Result{Gen: req.gen, Rows: DropMissing(RecentRows(ids, req.ix, os.Stat), os.Stat)})
 		return
 	}
-	files := make(chan fileResult, 1)
-	go func() {
-		defer func() {
-			if p := recover(); p != nil {
-				w.log.printf("panic in file search: %v\n%s", p, debug.Stack())
-				files <- fileResult{err: fmt.Errorf("file search failed: %v", p)}
-			}
-		}()
-		ix, ranked, err := w.eng.SearchPaths(req.query, true)
-		files <- fileResult{ix, ranked, err}
-	}()
+	pr := make(chan programRows, 1)
+	defer close(pr)
+	w.queueFiles(&fileReq{gen: req.gen, query: req.query, programs: pr})
 	programs := DropMissing(ProgramRows(req.ix, w.eng.Search(req.ix, req.query)), os.Stat)
 	var typed *index.Entry
 	if e, ok := TypedPath(req.query); ok {
 		typed = &e
 	}
+	pr <- programRows{programs, typed}
 	first := SearchResult(req.gen, programs, typed, nil, nil, nil)
 	first.Partial = true
 	w.deliver(first)
-	go func() {
-		defer w.recoverWorker("file search")
-		f := <-files
-		if req.gen != w.latestGen.Load() {
-			return
+}
+
+// queueFiles makes req the pending file search, replacing an older one that
+// has not started. It never blocks.
+func (w *window) queueFiles(req *fileReq) {
+	w.fileMu.Lock()
+	w.fileNext = req
+	w.fileMu.Unlock()
+	select {
+	case w.fileWake <- struct{}{}:
+	default:
+	}
+}
+
+// fileLoop runs one Everything search at a time, always the newest pending
+// one. A query that is no longer the latest is skipped or its result dropped.
+func (w *window) fileLoop() {
+	for range w.fileWake {
+		for {
+			w.fileMu.Lock()
+			req := w.fileNext
+			w.fileNext = nil
+			w.fileMu.Unlock()
+			if req == nil {
+				break
+			}
+			if req.gen == w.latestGen.Load() {
+				w.searchFiles(req)
+			}
 		}
-		w.deliver(SearchResult(req.gen, programs, typed, f.ix, f.ranked, f.err))
+	}
+}
+
+func (w *window) searchFiles(req *fileReq) {
+	defer w.recoverWorker("file search")
+	ix, ranked, err := func() (ix *index.Index, ranked []match.Result, err error) {
+		defer func() {
+			if p := recover(); p != nil {
+				w.log.printf("panic in file search: %v\n%s", p, debug.Stack())
+				err = fmt.Errorf("file search failed: %v", p)
+			}
+		}()
+		return w.eng.SearchPaths(req.query, true)
 	}()
+	if req.gen != w.latestGen.Load() {
+		return
+	}
+	p, ok := <-req.programs
+	if !ok || req.gen != w.latestGen.Load() {
+		return
+	}
+	w.deliver(SearchResult(req.gen, p.rows, p.typed, ix, ranked, err))
 }
 
 func (w *window) submit(req searchReq) {

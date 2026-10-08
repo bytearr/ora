@@ -27,17 +27,22 @@ var (
 	procCreateWindowExW     = user32.NewProc("CreateWindowExW")
 	procDestroyWindow       = user32.NewProc("DestroyWindow")
 	procDefWindowProcW      = user32.NewProc("DefWindowProcW")
-	procGetMessageW         = user32.NewProc("GetMessageW")
+	procPeekMessageW        = user32.NewProc("PeekMessageW")
+	procMsgWaitForMultiple  = user32.NewProc("MsgWaitForMultipleObjectsEx")
 	procDispatchMessageW    = user32.NewProc("DispatchMessageW")
 	procSendMessageTimeoutW = user32.NewProc("SendMessageTimeoutW")
 	procSetTimer            = user32.NewProc("SetTimer")
 	procKillTimer           = user32.NewProc("KillTimer")
-	procPostQuitMessage     = user32.NewProc("PostQuitMessage")
 )
 
 const (
 	wmCopyData       = 0x004A
 	wmTimer          = 0x0113
+	pmRemove         = 0x0001
+	qsAllInput       = 0x04FF
+	mwmoInputAvail   = 0x0004
+	infinite         = 0xFFFFFFFF
+	waitFailed       = 0xFFFFFFFF
 	hwndMessage      = ^uintptr(2) // (HWND)-3
 	smtoAbortIfHung  = 0x0002
 	copydataQuery2W  = 18
@@ -103,12 +108,10 @@ func wndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 		if cds.dwData == ipcReplyID {
 			ipcReply = bytes.Clone(unsafe.Slice((*byte)(cds.lpData), cds.cbData))
 			ipcDone = true
-			procPostQuitMessage.Call(0)
 			return 1
 		}
 	case wmTimer:
 		ipcTimeout = true
-		procPostQuitMessage.Call(0)
 		return 0
 	}
 	r, _, _ := procDefWindowProcW.Call(hwnd, msg, wParam, lParam)
@@ -197,13 +200,21 @@ func queryOnThread(target uintptr, search string, maxResults, searchFlags uint32
 
 	procSetTimer.Call(hwnd, 1, ipcTimeoutMillis, 0)
 	defer procKillTimer.Call(hwnd, 1)
+	// The reply is a sent WM_COPYDATA. GetMessage would handle it and keep
+	// waiting for a posted message, so wait for any input and peek instead:
+	// PeekMessage runs pending sent messages and returns, and the flags are
+	// checked after every call.
 	var m winMsg
 	for !ipcDone && !ipcTimeout {
-		g, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
-		if int32(g) <= 0 {
+		if w, _, _ := procMsgWaitForMultiple.Call(0, 0, infinite, qsAllInput, mwmoInputAvail); w == waitFailed {
 			break
 		}
-		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
+		for !ipcDone && !ipcTimeout {
+			if r, _, _ := procPeekMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0, pmRemove); r == 0 {
+				break
+			}
+			procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
+		}
 	}
 	if !ipcDone {
 		return nil, 0, fmt.Errorf("no reply from Everything within %d s", ipcTimeoutMillis/1000)
