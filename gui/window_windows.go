@@ -622,10 +622,10 @@ func (w *window) search(req searchReq) {
 	if e, ok := TypedPath(req.query); ok {
 		typed = &e
 	}
-	pr <- programRows{programs, typed}
 	first := SearchResult(req.gen, programs, typed, nil, nil, nil)
 	first.Partial = true
 	w.deliver(first)
+	pr <- programRows{programs, typed}
 }
 
 // queueFiles makes req the pending file search, replacing an older one that
