@@ -88,7 +88,9 @@ var (
 	classErr  error
 	className = windows.StringToUTF16Ptr("ora_everything_reply")
 
-	// Reply state, only touched on the thread running queryIPC.
+	// ipcMu serializes queryIPC. The reply state below is shared by every
+	// query; only the lock keeps it on one thread at a time.
+	ipcMu      sync.Mutex
 	ipcReply   []byte
 	ipcDone    bool
 	ipcTimeout bool
@@ -155,6 +157,8 @@ func queryIPC(search string, maxResults, searchFlags uint32, keepFolders bool) (
 		total int
 		err   error
 	}
+	ipcMu.Lock()
+	defer ipcMu.Unlock()
 	done := make(chan result, 1)
 	go func() {
 		runtime.LockOSThread()

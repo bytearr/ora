@@ -583,7 +583,9 @@ type fileResult struct {
 
 // search delivers the answer to req. A text query is answered twice: the
 // programs as soon as they are ranked, the full list when Everything has
-// replied. Both searches run at the same time.
+// replied. Both searches run at the same time, and search returns after the
+// programs so the next query need not wait for Everything; a file result
+// that is no longer the latest query is dropped.
 func (w *window) search(req searchReq) {
 	defer func() {
 		if p := recover(); p != nil {
@@ -618,8 +620,14 @@ func (w *window) search(req searchReq) {
 	first := SearchResult(req.gen, programs, typed, nil, nil, nil)
 	first.Partial = true
 	w.deliver(first)
-	f := <-files
-	w.deliver(SearchResult(req.gen, programs, typed, f.ix, f.ranked, f.err))
+	go func() {
+		defer w.recoverWorker("file search")
+		f := <-files
+		if req.gen != w.latestGen.Load() {
+			return
+		}
+		w.deliver(SearchResult(req.gen, programs, typed, f.ix, f.ranked, f.err))
+	}()
 }
 
 func (w *window) submit(req searchReq) {
