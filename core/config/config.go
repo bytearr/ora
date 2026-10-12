@@ -16,7 +16,23 @@ const (
 
 	DefaultExcludeRegex = `\\(Windows|WinSxS|WindowsApps|WinGet|Package Cache|Installer|node_modules|\.git|Temp|\$Recycle\.Bin|System Volume Information|History|globalStorage|workspaceStorage|CMakeFiles|\.nuget|site-packages|go\\pkg\\mod|resources\\app|target\\(debug|release)\\(build|deps|incremental))\\`
 	ProgramFilesRegex   = `^[A-Z]:\\Program Files( \(x86\))?\\`
+
+	// The Linux counterparts: caches, VCS and build trees, and the system
+	// prefixes where package managers install programs.
+	LinuxExcludeRegex   = `/(\.git|\.hg|\.svn|node_modules|\.cache|\.npm|\.m2|\.gradle|\.cargo|\.rustup|\.local/share/Trash|\.local/share/containers|\.var/app/[^/]+/cache|__pycache__|\.venv|venv|site-packages|go/pkg/mod|target/(debug|release)|CMakeFiles|\.vscode-server|\.copilot|snap/[^/]+/common/\.cache)/`
+	LinuxInstalledRegex = `^/(usr|opt|snap|var/lib/flatpak|nix/store)/`
 )
+
+// Files configures ora's own file index, the Everything replacement where
+// there is no Everything (Linux). Windows ignores it.
+type Files struct {
+	// Roots are the trees that are indexed; empty means the home folder.
+	Roots []string `mapstructure:"roots"`
+	// Rescan is how old the index may get before a full rescan.
+	Rescan time.Duration `mapstructure:"rescan"`
+	// Watch keeps long-running processes (ora mcp) current with inotify.
+	Watch bool `mapstructure:"watch"`
+}
 
 type Everything struct {
 	Enabled           bool     `mapstructure:"enabled"`
@@ -44,6 +60,7 @@ type Config struct {
 	Aliases      map[string]string `mapstructure:"aliases"`
 	Ignore       []string          `mapstructure:"ignore"`
 	Everything   Everything        `mapstructure:"everything"`
+	Files        Files             `mapstructure:"files"`
 	Settings     Settings          `mapstructure:"settings"`
 }
 
@@ -59,11 +76,14 @@ func SetDefaults(v *viper.Viper) {
 	v.SetDefault("ignore", []string{"*uninstall*"})
 	v.SetDefault("everything.enabled", true)
 	v.SetDefault("everything.autostart", true)
-	v.SetDefault("everything.extensions", []string{"exe", "ahk", "cmd", "bat"})
-	v.SetDefault("everything.exclude_regex", DefaultExcludeRegex)
+	v.SetDefault("everything.extensions", platformExtensions)
+	v.SetDefault("everything.exclude_regex", platformExcludeRegex)
 	v.SetDefault("everything.extra_exclude_regex", []string{})
 	v.SetDefault("everything.include_regex", []string{})
 	v.SetDefault("everything.max_results", 20000)
+	v.SetDefault("files.roots", []string{})
+	v.SetDefault("files.rescan", "1h")
+	v.SetDefault("files.watch", true)
 }
 
 // Load reads config.yaml into v (missing file means defaults) and decodes it.
@@ -92,20 +112,6 @@ func Load(v *viper.Viper) (*Config, error) {
 	return &c, nil
 }
 
-func envDir(env string) (string, error) {
-	base := os.Getenv(env)
-	if base == "" {
-		return "", fmt.Errorf("%%%s%% is not set", env)
-	}
-	return filepath.Join(base, appName), nil
-}
-
-// Dir is %APPDATA%\ora (config and recent list).
-func Dir() (string, error) { return envDir("APPDATA") }
-
-// CacheDir is %LOCALAPPDATA%\ora (index cache).
-func CacheDir() (string, error) { return envDir("LOCALAPPDATA") }
-
 func ConfigFile() (string, error) {
 	d, err := Dir()
 	if err != nil {
@@ -120,6 +126,15 @@ func CacheFile() (string, error) {
 		return "", err
 	}
 	return filepath.Join(d, "index.json"), nil
+}
+
+// FilesCacheFile holds ora's own file index (Linux).
+func FilesCacheFile() (string, error) {
+	d, err := CacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "files.idx"), nil
 }
 
 func RecentFile() (string, error) {

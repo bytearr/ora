@@ -13,7 +13,9 @@ func testEngine(t *testing.T) *Engine {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("APPDATA", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("LOCALAPPDATA", dir)
+	t.Setenv("XDG_CACHE_HOME", dir)
 	return &Engine{Cfg: &config.Config{Aliases: map[string]string{}, IndexTTL: 24 * time.Hour}}
 }
 
@@ -75,7 +77,7 @@ func TestRememberFrontAndID(t *testing.T) {
 	e.Remember(s)
 	e.Remember(f)
 	ids, _ := e.RecentIDs()
-	want := []string{`path:e:\docs\notes.txt`, "aumid:calc!app"}
+	want := []string{"path:" + index.FoldPath(`E:\Docs\Notes.TXT`), "aumid:calc!app"}
 	if len(ids) != 2 || ids[0] != want[0] || ids[1] != want[1] {
 		t.Fatalf("got %v", ids)
 	}

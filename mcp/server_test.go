@@ -62,7 +62,9 @@ func newFake(t *testing.T) (*fake, *config.Config) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("APPDATA", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("LOCALAPPDATA", dir)
+	t.Setenv("XDG_CACHE_HOME", dir)
 	if err := os.MkdirAll(filepath.Join(dir, "ora"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +251,7 @@ func TestTypedPaths(t *testing.T) {
 	if e := call(t, cs, "launch", map[string]any{"id": file}, &d); e != "" {
 		t.Fatal(e)
 	}
-	if e := call(t, cs, "launch", map[string]any{"id": "path:" + strings.ToLower(file)}, &d); e != "" {
+	if e := call(t, cs, "launch", map[string]any{"id": "path:" + index.FoldPath(file)}, &d); e != "" {
 		t.Fatal(e)
 	}
 	if len(f.launched) != 2 || f.launched[0].Kind != index.KindFile || f.launchIx[0] != nil {
@@ -288,7 +290,7 @@ func TestSearchFiles(t *testing.T) {
 	if e := call(t, cs, "search_files", map[string]any{"query": "notes", "folders": true}, &r); e != "" {
 		t.Fatal(e)
 	}
-	if len(r.Rows) == 0 || r.Rows[0].ID != `path:e:\docs\notes.txt` || r.Rows[0].Kind != "file" {
+	if len(r.Rows) == 0 || r.Rows[0].ID != "path:"+index.FoldPath(`E:\Docs\notes.txt`) || r.Rows[0].Kind != "file" {
 		t.Fatalf("result %+v", r)
 	}
 	f.filesErr = engine.ErrNeedsEverything

@@ -128,6 +128,37 @@ type Model struct {
 
 	pending, pendingReveal bool // Enter pressed while Stale
 	partial                bool // Rows are a Partial result of Gen
+
+	// visLimit and expLimit lower visibleRows and expandedRows on a screen
+	// too short for them; 0 is the constant.
+	visLimit, expLimit int
+}
+
+// SetRowLimits caps the hits before Show more and on screen after it, so
+// the list fits the screen; the constants stay the maximum, 0 resets.
+func (m *Model) SetRowLimits(visible, expanded int) {
+	m.visLimit, m.expLimit = visible, expanded
+	m.Sel = max(0, min(m.Sel, len(m.Items())-1))
+	m.follow()
+}
+
+// RowLimits are the hits before Show more and on screen after it.
+func (m *Model) RowLimits() (visible, expanded int) {
+	return m.visibleN(), m.expandedN()
+}
+
+func (m *Model) visibleN() int {
+	if m.visLimit > 0 {
+		return min(m.visLimit, visibleRows)
+	}
+	return visibleRows
+}
+
+func (m *Model) expandedN() int {
+	if m.expLimit > 0 {
+		return min(m.expLimit, expandedRows)
+	}
+	return expandedRows
 }
 
 // SetQuery starts a new generation: results of older ones are dropped and
@@ -176,14 +207,14 @@ func (m *Model) TakePending() Action {
 // hits and the button, after it every hit.
 func (m *Model) Items() []Item {
 	n := len(m.Rows)
-	if !m.Expanded && n > visibleRows {
-		n = visibleRows
+	if !m.Expanded && n > m.visibleN() {
+		n = m.visibleN()
 	}
 	items := make([]Item, 0, n+1)
 	for i := 0; i < n; i++ {
 		items = append(items, Item{Row: i})
 	}
-	if !m.Expanded && len(m.Rows) > visibleRows {
+	if !m.Expanded && len(m.Rows) > m.visibleN() {
 		items = append(items, Item{Row: -1, More: true})
 	}
 	return items
@@ -196,7 +227,7 @@ func (m *Model) Visible() (first int, items []Item) {
 	if !m.Expanded {
 		return 0, all
 	}
-	end := min(m.Top+expandedRows, len(all))
+	end := min(m.Top+m.expandedN(), len(all))
 	return m.Top, all[m.Top:end]
 }
 
@@ -215,7 +246,7 @@ func (m *Model) Scroll(d int) {
 	if !m.Expanded {
 		return
 	}
-	m.Top = max(0, min(max(0, len(m.Rows)-expandedRows), m.Top+d))
+	m.Top = max(0, min(max(0, len(m.Rows)-m.expandedN()), m.Top+d))
 }
 
 func (m *Model) follow() {
@@ -226,8 +257,8 @@ func (m *Model) follow() {
 	if m.Sel < m.Top {
 		m.Top = m.Sel
 	}
-	if m.Sel >= m.Top+expandedRows {
-		m.Top = m.Sel - expandedRows + 1
+	if m.Sel >= m.Top+m.expandedN() {
+		m.Top = m.Sel - m.expandedN() + 1
 	}
 }
 
@@ -327,7 +358,7 @@ func PathRows(ix *index.Index, rs []match.Result, skip map[string]bool) []Row {
 	rows := make([]Row, 0, len(rs))
 	for _, r := range rs {
 		e := ix.Entries[r.Index]
-		if skip[strings.ToLower(e.Target)] {
+		if skip[index.FoldPath(e.Target)] {
 			continue
 		}
 		rows = append(rows, Row{Entry: e})
@@ -335,21 +366,32 @@ func PathRows(ix *index.Index, rs []match.Result, skip map[string]bool) []Row {
 	return rows
 }
 
-// SearchResult puts programs before files and folders. A typed path is the
-// first file row. A failed file search keeps the programs and becomes the
-// note.
+// SearchResult puts the best match.PickerRows programs before files and
+// folders, as many as the CLI picker shows; weaker programs follow the
+// files. A typed path is the first file row. A failed file search keeps
+// the programs and becomes the note. Without a file result yet (files nil,
+// no error: the Partial) the weaker programs are left out, so the full
+// result only appends rows.
 func SearchResult(gen uint64, programs []Row, typed *index.Entry, files *index.Index, ranked []match.Result, filesErr error) Result {
-	r := Result{Gen: gen, Rows: append([]Row(nil), programs...)}
+	top, rest := programs, []Row(nil)
+	if len(top) > match.PickerRows {
+		top, rest = programs[:match.PickerRows], programs[match.PickerRows:]
+	}
+	r := Result{Gen: gen, Rows: append([]Row(nil), top...)}
 	skip := map[string]bool{}
 	if typed != nil {
 		r.Rows = append(r.Rows, Row{Entry: *typed})
-		skip[strings.ToLower(typed.Target)] = true
+		skip[index.FoldPath(typed.Target)] = true
 	}
-	if filesErr != nil {
+	switch {
+	case filesErr != nil:
 		r.Note = filesErr.Error()
+	case files == nil:
 		return r
+	default:
+		r.Rows = append(r.Rows, PathRows(files, ranked, skip)...)
 	}
-	r.Rows = append(r.Rows, PathRows(files, ranked, skip)...)
+	r.Rows = append(r.Rows, rest...)
 	return r
 }
 

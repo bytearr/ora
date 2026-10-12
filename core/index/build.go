@@ -102,7 +102,7 @@ func Merge(groups [][]Entry, ignore []string) []Entry {
 			if aumid != "" && seenAUMID[aumid] {
 				continue
 			}
-			p := strings.ToLower(filepath.Clean(e.Path()))
+			p := FoldPath(filepath.Clean(e.Path()))
 			if e.Path() != "" && seenPath[p] {
 				continue
 			}

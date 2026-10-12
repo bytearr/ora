@@ -10,7 +10,7 @@ An agent searches first, then launches or reveals by the `id` a search returned.
 
 Input: `query` (string).
 
-Ranks the indexed programs (Start Menu, registry, Store apps, Everything) like `ora <query>` does. Launches nothing.
+Ranks the indexed programs (Start Menu, registry, Store apps, Everything; on Linux desktop entries and AppImages) like `ora <query>` does. Launches nothing.
 
 Output:
 
@@ -34,7 +34,7 @@ Output:
 
 Input: `query` (string), `folders` (bool, optional).
 
-Finds files by name via Everything, like `ora file`. With `folders: true` it also finds folders, like `ora open -f`. Output is the same shape as above with kind `file` or `folder`. Opens nothing. If Everything is not running, the call fails with that error.
+Finds files by name via Everything (on Linux: ora's own file index, kept current with inotify), like `ora file`. With `folders: true` it also finds folders, like `ora open -f`. Output is the same shape as above with kind `file` or `folder`. Opens nothing. On Windows, if Everything is not running, the call fails with that error.
 
 ### launch
 
@@ -51,7 +51,7 @@ Starts the entry with exactly this id and puts it in the recent list.
 
 Input: `id` (string).
 
-Shows the entry in Explorer. A folder is opened. Anything else is selected in its folder. It accepts the same ids and absolute paths as `launch`. Store apps have no file and fail. Launches nothing.
+Shows the entry in Explorer (on Linux: the file manager). A folder is opened. Anything else is selected in its folder. It accepts the same ids and absolute paths as `launch`. Store apps have no file and fail. Launches nothing.
 
 ## Cursor
 
