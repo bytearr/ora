@@ -41,11 +41,13 @@ type Index struct {
 	exclude []*regexp.Regexp
 	key     string // roots and excludes; a cache with another key is ignored
 
-	mu      sync.RWMutex
-	built   time.Time
-	entries []entry
-	pos     map[string]int
-	dirty   bool
+	mu         sync.RWMutex
+	built      time.Time
+	entries    []entry
+	pos        map[string]int
+	dirty      bool
+	generation uint64
+	writeFile  func(string, []byte) error
 }
 
 // New prepares an empty index over roots. exclude is matched against
@@ -65,10 +67,11 @@ func New(roots []string, exclude []*regexp.Regexp) *Index {
 		fmt.Fprintf(h, "exclude %s\n", re.String())
 	}
 	return &Index{
-		roots:   clean,
-		exclude: exclude,
-		key:     hex.EncodeToString(h.Sum(nil))[:16],
-		pos:     map[string]int{},
+		roots:     clean,
+		exclude:   exclude,
+		key:       hex.EncodeToString(h.Sum(nil))[:16],
+		pos:       map[string]int{},
+		writeFile: config.WriteFileAtomic,
 	}
 }
 
@@ -176,6 +179,7 @@ func (ix *Index) Scan() error {
 	}
 	ix.mu.Lock()
 	ix.entries, ix.pos, ix.built, ix.dirty = es, pos, time.Now(), true
+	ix.generation++
 	ix.mu.Unlock()
 	return errors.Join(errs...)
 }
@@ -234,6 +238,7 @@ func (ix *Index) Load(path string) (ok bool, err error) {
 // Save writes the index atomically.
 func (ix *Index) Save(path string) error {
 	ix.mu.RLock()
+	generation := ix.generation
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\t%d\t%d\t%s\n", cacheMagic, cacheVersion, ix.built.UnixNano(), ix.key)
 	for _, e := range ix.entries {
@@ -246,11 +251,13 @@ func (ix *Index) Save(path string) error {
 		b.WriteByte('\n')
 	}
 	ix.mu.RUnlock()
-	if err := config.WriteFileAtomic(path, []byte(b.String())); err != nil {
+	if err := ix.writeFile(path, []byte(b.String())); err != nil {
 		return err
 	}
 	ix.mu.Lock()
-	ix.dirty = false
+	if ix.generation == generation {
+		ix.dirty = false
+	}
 	ix.mu.Unlock()
 	return nil
 }
@@ -342,6 +349,7 @@ func (ix *Index) add(p string, dir bool) {
 	ix.pos[p] = len(ix.entries)
 	ix.entries = append(ix.entries, newEntry(p, dir))
 	ix.dirty = true
+	ix.generation++
 }
 
 // remove drops p and everything below it. Callers hold mu.
@@ -369,6 +377,7 @@ func (ix *Index) removeAt(i int) {
 	}
 	ix.entries = ix.entries[:last]
 	ix.dirty = true
+	ix.generation++
 }
 
 func (ix *Index) isDirty() bool {
