@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ const (
 	KindPortable Kind = "portable" // file found by Everything
 	KindFile     Kind = "file"     // any file opened with its default app, never cached
 	KindFolder   Kind = "folder"   // a directory opened in Explorer, never cached
+	KindDesktop  Kind = "desktop"  // XDG .desktop application entry (Linux)
 )
 
 type Source string
@@ -30,7 +32,8 @@ const (
 	SourceRegistry   Source = "registry"
 	SourceAppsFolder Source = "appsfolder"
 	SourceEverything Source = "everything"
-	SourceSearch     Source = "search" // live `ora file` result or a typed path
+	SourceSearch     Source = "search"  // live `ora file` result or a typed path
+	SourceDesktop    Source = "desktop" // XDG application entries (Linux)
 )
 
 type Entry struct {
@@ -47,11 +50,29 @@ type Entry struct {
 }
 
 // ID is stable across rebuilds and used for the recent-launch list.
+// Paths are folded only where the file system ignores case.
 func (e Entry) ID() string {
 	if e.Kind == KindStore {
 		return "aumid:" + strings.ToLower(e.AUMID)
 	}
-	return "path:" + strings.ToLower(e.Target)
+	return "path:" + FoldPath(e.Target)
+}
+
+// SameID compares two ids the way the platform compares paths.
+func SameID(a, b string) bool {
+	if foldCase {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+// FoldPath is the comparison key of a path: lower case on Windows, as is
+// elsewhere.
+func FoldPath(p string) string {
+	if foldCase {
+		return strings.ToLower(p)
+	}
+	return p
 }
 
 // Path is the file the entry ultimately runs, used for path dedupe.
@@ -66,6 +87,8 @@ func (e Entry) Path() string {
 }
 
 const cacheVersion = 1
+
+var foldCase = runtime.GOOS == "windows"
 
 type Index struct {
 	Version int       `json:"version"`

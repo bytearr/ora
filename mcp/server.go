@@ -96,7 +96,7 @@ func New(eng Engine, minScore, gap float64) *sdk.Server {
 	}, t.searchPrograms)
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "search_files",
-		Description: "Find files (and folders if folders is true) by name via Everything. Returns up to 8 rows with ids and ora's decision. Opens nothing.",
+		Description: "Find files (and folders if folders is true) by name via " + fileSearchName + ". Returns up to 8 rows with ids and ora's decision. Opens nothing.",
 	}, t.searchFiles)
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "launch",
@@ -104,7 +104,7 @@ func New(eng Engine, minScore, gap float64) *sdk.Server {
 	}, t.launch)
 	sdk.AddTool(s, &sdk.Tool{
 		Name:        "reveal",
-		Description: "Show the entry with this exact id in Explorer: a folder is opened, anything else is selected in its folder. Launches nothing.",
+		Description: "Show the entry with this exact id in " + fileManagerName + ": a folder is opened, anything else is selected in its folder. Launches nothing.",
 	}, t.reveal)
 	return s
 }
@@ -205,7 +205,7 @@ func (t *tools) resolve(id string) (*index.Index, index.Entry, error) {
 		return nil, index.Entry{}, err
 	}
 	for _, e := range ix.Entries {
-		if strings.EqualFold(e.ID(), id) {
+		if index.SameID(e.ID(), id) {
 			return ix, e, nil
 		}
 	}

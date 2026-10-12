@@ -105,7 +105,7 @@ func ExcludeRegexps(ev config.Everything, withProgramFiles bool) ([]*regexp.Rege
 	}
 	pats = append(pats, ev.ExtraExcludeRegex...)
 	if withProgramFiles {
-		pats = append(pats, config.ProgramFilesRegex)
+		pats = append(pats, config.InstalledRegex)
 	}
 	return CompileRegexps(pats)
 }
@@ -139,7 +139,7 @@ func EverythingSearch(ev config.Everything) string {
 		excl = append(excl, ev.ExcludeRegex)
 	}
 	excl = append(excl, ev.ExtraExcludeRegex...)
-	excl = append(excl, config.ProgramFilesRegex)
+	excl = append(excl, config.InstalledRegex)
 	for _, x := range excl {
 		parts = append(parts, `!path:regex:"`+x+`"`)
 	}

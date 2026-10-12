@@ -80,6 +80,9 @@ func TestMergeDedupe(t *testing.T) {
 
 	got := Merge([][]Entry{startMenu, registry, apps, everything}, nil)
 	want := []string{"Discord", "Calculator", "Firefox", "GIMP", "Photos", "python", "python", "python", "Note Taker", "Note Taker", "Pixel Paint Studio"}
+	if !foldCase { // FIREFOX.EXE is another file where case matters
+		want = append(want[:3], append([]string{"Mozilla Firefox (x64 en-US)"}, want[3:]...)...)
+	}
 	if g := names(got); len(g) != len(want) {
 		t.Fatalf("got %v, want %v", g, want)
 	} else {
@@ -99,5 +102,16 @@ func TestMergeDedupe(t *testing.T) {
 		if (e.Name == "Pixel Paint Studio" || e.Name == "Note Taker") && e.Generic {
 			t.Errorf("%s: fewer than %d copies marked generic", e.Name, GenericMinCopies)
 		}
+	}
+}
+
+func TestPathCase(t *testing.T) {
+	a := Entry{Kind: KindPortable, Target: "/home/me/Apps/Tool.AppImage"}
+	b := Entry{Kind: KindPortable, Target: "/home/me/apps/tool.appimage"}
+	if got := SameID(a.ID(), b.ID()); got != foldCase {
+		t.Errorf("SameID = %v, want %v", got, foldCase)
+	}
+	if !SameID(a.ID(), a.ID()) {
+		t.Error("an id must equal itself")
 	}
 }

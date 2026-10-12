@@ -327,7 +327,7 @@ func PathRows(ix *index.Index, rs []match.Result, skip map[string]bool) []Row {
 	rows := make([]Row, 0, len(rs))
 	for _, r := range rs {
 		e := ix.Entries[r.Index]
-		if skip[strings.ToLower(e.Target)] {
+		if skip[index.FoldPath(e.Target)] {
 			continue
 		}
 		rows = append(rows, Row{Entry: e})
@@ -343,7 +343,7 @@ func SearchResult(gen uint64, programs []Row, typed *index.Entry, files *index.I
 	skip := map[string]bool{}
 	if typed != nil {
 		r.Rows = append(r.Rows, Row{Entry: *typed})
-		skip[strings.ToLower(typed.Target)] = true
+		skip[index.FoldPath(typed.Target)] = true
 	}
 	if filesErr != nil {
 		r.Note = filesErr.Error()

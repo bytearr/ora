@@ -97,6 +97,7 @@ func TestCheckSettingsFallbacks(t *testing.T) {
 func TestEnsureConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("APPDATA", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
 	path, created, err := EnsureConfigFile()
 	if err != nil || !created || path != filepath.Join(dir, "ora", "config.yaml") {
 		t.Fatalf("%s %v %v", path, created, err)
@@ -124,6 +125,7 @@ func TestTemplate(t *testing.T) {
 	}
 	dir := t.TempDir()
 	t.Setenv("APPDATA", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
 	if _, _, err := EnsureConfigFile(); err != nil {
 		t.Fatal(err)
 	}

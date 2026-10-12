@@ -29,10 +29,16 @@ type Engine struct {
 	// Debug prints sources, timings and launch targets; nil is silent.
 	Debug WarnFunc
 
+	// LiveFiles keeps ora's own file index (Linux) current with inotify;
+	// set it in long-running processes before the first search.
+	LiveFiles bool
+
 	mu      sync.Mutex
 	candsIx *index.Index // index the cached candidates belong to
 	cands   []match.Candidate
 	ids     []string
+
+	files platformFiles
 }
 
 // ErrNeedsEverything is returned by SearchPaths when Everything is not running.
@@ -83,6 +89,8 @@ func (e *Engine) Index(force bool) (*index.Index, error) {
 			e.debug("index: cache older than %s, rebuilding sources 1-3", e.Cfg.IndexTTL)
 			return e.build(false, ix.BySource(index.SourceEverything))
 		}
+	} else {
+		e.refreshFiles()
 	}
 	return e.build(true, nil)
 }
@@ -100,11 +108,7 @@ func (e *Engine) build(withEverything bool, carry []index.Entry) (*index.Index, 
 		return nil, fmt.Errorf("include_regex: %w", err)
 	}
 
-	sources := []discover.Source{
-		discover.StartMenu{},
-		discover.Registry{Exclude: regExcl},
-		discover.AppsFolder{},
-	}
+	sources := platformSources(regExcl)
 	var groups [][]index.Entry
 	for _, s := range sources {
 		groups = append(groups, e.discover(s))
@@ -113,14 +117,14 @@ func (e *Engine) build(withEverything bool, carry []index.Entry) (*index.Index, 
 	switch {
 	case withEverything && e.Cfg.Everything.Enabled:
 		start := time.Now()
-		es, err := discover.Everything{Cfg: e.Cfg.Everything, Exclude: evExcl}.Discover(e.warn)
+		es, err := e.portable(evExcl)
 		switch {
 		case errors.Is(err, discover.ErrEverythingNotRunning):
 			e.warn("everything: not running, portable programs skipped")
 		case err != nil:
-			e.warn("everything: %v", err)
+			e.warn("%s: %v", portableSource, err)
 		default:
-			e.debug("source everything: %d entries in %s", len(es), time.Since(start).Round(time.Millisecond))
+			e.debug("source %s: %d entries in %s", portableSource, len(es), time.Since(start).Round(time.Millisecond))
 			groups = append(groups, es)
 		}
 	case !withEverything:
@@ -191,28 +195,14 @@ func (e *Engine) Search(ix *index.Index, query string) []match.Result {
 	return match.Rank(query, e.candidates(ix, recent))
 }
 
-// SearchPaths asks Everything for files (and folders when folders is set)
+// SearchPaths asks Everything (or ora's own file index) for files (and folders when folders is set)
 // and ranks them. The returned index holds only these paths. No match is an
 // empty result, not an error.
 func (e *Engine) SearchPaths(query string, folders bool) (*index.Index, []match.Result, error) {
 	start := time.Now()
-	var hits []discover.Hit
-	var total int
-	var err error
-	if folders {
-		hits, total, err = discover.SearchOpen(e.Cfg.Everything, query, fileSearchLimit, e.warn)
-	} else {
-		var paths []string
-		paths, total, err = discover.SearchFiles(e.Cfg.Everything, query, fileSearchLimit, e.warn)
-		for _, p := range paths {
-			hits = append(hits, discover.Hit{Path: p})
-		}
-	}
-	if errors.Is(err, discover.ErrEverythingNotRunning) {
-		return nil, nil, ErrNeedsEverything
-	}
+	hits, total, err := e.findPaths(query, folders)
 	if err != nil {
-		return nil, nil, fmt.Errorf("everything: %w", err)
+		return nil, nil, err
 	}
 	e.debug("file search: %d of %d results in %s", len(hits), total, time.Since(start).Round(time.Millisecond))
 	if total > len(hits) && len(hits) >= fileSearchLimit {

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"golang.org/x/sys/windows"
 
 	"ora/core/config"
 	"ora/core/discover"
@@ -27,8 +25,8 @@ func NewRoot() *cobra.Command {
 	a := &app{v: viper.New()}
 	root := &cobra.Command{
 		Use:   "ora <query> [args...]",
-		Short: "Start a Windows app by a short, possibly misspelled name",
-		Long: "Start a Windows app by a short, possibly misspelled name.\n\n" +
+		Short: "Start " + appKind + " by a short, possibly misspelled name",
+		Long: "Start " + appKind + " by a short, possibly misspelled name.\n\n" +
 			"The first argument is the query, the rest is passed to the app:\n" +
 			"  ora code .\n" +
 			"With --, all words before it form the query:\n" +
@@ -87,6 +85,7 @@ func NewRoot() *cobra.Command {
 			Short: "Serve search, launch and reveal to agents over MCP on stdin/stdout",
 			Args:  cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
+				a.eng.LiveFiles = true
 				return mcp.Run(cmd.Context(), a.eng)
 			},
 		},
@@ -107,7 +106,7 @@ func fileCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "file <query...>",
 		Aliases: []string{"f"},
-		Short:   "Find any file by name via Everything and open it with its default app",
+		Short:   "Find any file by name via " + fileSearchName + " and open it with its default app",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return a.runFile(strings.Join(args, " "), which)
@@ -121,7 +120,7 @@ func openCmd(a *app) *cobra.Command {
 	var file bool
 	cmd := &cobra.Command{
 		Use:   "open <query...>",
-		Short: "Show the match in Explorer instead of launching it",
+		Short: "Show the match in " + fileManagerName + " instead of launching it",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return a.runOpen(strings.Join(args, " "), file)
@@ -343,9 +342,7 @@ func (a *app) runIndex() error {
 		counts[e.Source]++
 	}
 	path, _ := config.CacheFile()
-	fmt.Printf("%d entries (startmenu %d, registry %d, appsfolder %d, everything %d) -> %s\n",
-		len(ix.Entries), counts[index.SourceStartMenu], counts[index.SourceRegistry],
-		counts[index.SourceAppsFolder], counts[index.SourceEverything], path)
+	fmt.Printf("%d entries (%s) -> %s\n", len(ix.Entries), sourceCounts(counts), path)
 	return nil
 }
 
@@ -367,7 +364,7 @@ func (a *app) runList() error {
 	}
 	if !Interactive() {
 		_, err := io.WriteString(os.Stdout, buf.String())
-		if errors.Is(err, windows.ERROR_NO_DATA) || errors.Is(err, windows.ERROR_BROKEN_PIPE) {
+		if readerGone(err) {
 			return nil // reader closed early, e.g. `ora list | Select -First 5`
 		}
 		return err
