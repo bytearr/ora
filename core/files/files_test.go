@@ -107,6 +107,58 @@ func TestRemoveTree(t *testing.T) {
 	}
 }
 
+func TestOverlappingRoots(t *testing.T) {
+	root := tree(t, "Docs/notes.txt", "Docs/sub/deep.txt", "top.txt")
+	docs := filepath.Join(root, "Docs")
+	note := filepath.Join(docs, "notes.txt")
+	inSync := func(ix *Index) {
+		t.Helper()
+		if len(ix.pos) != len(ix.entries) {
+			t.Fatalf("pos %d, entries %d", len(ix.pos), len(ix.entries))
+		}
+		for p, i := range ix.pos {
+			if ix.entries[i].path != p {
+				t.Fatalf("pos out of sync for %s", p)
+			}
+		}
+	}
+	for _, roots := range [][]string{{root, docs}, {docs, root}, {root, root + "/"}} {
+		ix := New(roots, nil)
+		if err := ix.Scan(); err != nil {
+			t.Fatal(err)
+		}
+		if hits, _ := ix.Search("notes", false, false, 0); len(hits) != 1 {
+			t.Fatalf("roots %v: %v", roots, paths(hits))
+		}
+		inSync(ix)
+		ix.remove(note)
+		if hits, _ := ix.Search("notes", false, false, 0); len(hits) != 0 {
+			t.Fatalf("roots %v: removed file still found", roots)
+		}
+		inSync(ix)
+	}
+
+	ix := New([]string{root, docs}, nil)
+	cache := filepath.Join(t.TempDir(), "files.idx")
+	if err := ix.Scan(); err != nil {
+		t.Fatal(err)
+	}
+	if err := ix.Save(cache); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(cache, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString("f" + note + "\n")
+	f.Close()
+	back := New([]string{root, docs}, nil)
+	if ok, err := back.Load(cache); !ok || err != nil || back.Len() != ix.Len() {
+		t.Fatalf("load: %v %v %d/%d", ok, err, back.Len(), ix.Len())
+	}
+	inSync(back)
+}
+
 func TestWatch(t *testing.T) {
 	root := tree(t, "old.txt", "skip/")
 	cache := filepath.Join(t.TempDir(), "files.idx")

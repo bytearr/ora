@@ -83,10 +83,12 @@ Instead of Everything, ora keeps its own file name index, no root required: a fu
 The window needs GTK 4, gtk4-layer-shell and the gdk-pixbuf SVG loader (librsvg) at run time; building needs cgo and the headers:
 
 ```sh
-sudo apt install libgtk-4-dev libgtk4-layer-shell-dev librsvg2-common   # Debian, Ubuntu
+sudo apt install libgtk-4-dev libgtk4-layer-shell-dev librsvg2-common   # Kali rolling
 sudo dnf install gtk4-devel gtk4-layer-shell-devel librsvg2             # Fedora
 sudo pacman -S gtk4 gtk4-layer-shell librsvg                            # Arch
 ```
+
+Ubuntu 24.04 has no `libgtk4-layer-shell-dev`; its `libgtk-layer-shell-dev` is the GTK 3 library and does not fit. There, install `libgtk-4-dev librsvg2-common` and build [gtk4-layer-shell](https://github.com/wmww/gtk4-layer-shell) from source. Without its `gtk4-layer-shell-0` pkg-config file the window does not build, and neither does `go test ./gui`.
 
 Without them, `go install -tags nogui .` (or `CGO_ENABLED=0`) builds the terminal command and `ora mcp` only; `ora` without arguments then prints the help.
 

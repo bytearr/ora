@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -142,23 +143,36 @@ func (ix *Index) walk(root string, fn func(p string, dir bool)) error {
 	})
 }
 
+// within reports whether p is root or below it.
+func within(p, root string) bool {
+	return p == root || strings.HasPrefix(p, strings.TrimSuffix(root, "/")+"/")
+}
+
 // Scan rebuilds the index from disk. The old content stays searchable
-// until the new one is complete.
+// until the new one is complete. A root inside an earlier root is not
+// walked again, and a path reached from two roots is listed once.
 func (ix *Index) Scan() error {
 	var es []entry
+	pos := map[string]int{}
+	var walked []string
 	var errs []error
 	for _, r := range ix.roots {
-		err := ix.walk(r, func(p string, dir bool) { es = append(es, newEntry(p, dir)) })
+		if slices.ContainsFunc(walked, func(w string) bool { return within(r, w) }) {
+			continue
+		}
+		walked = append(walked, r)
+		err := ix.walk(r, func(p string, dir bool) {
+			if _, dup := pos[p]; !dup {
+				pos[p] = len(es)
+				es = append(es, newEntry(p, dir))
+			}
+		})
 		if err != nil {
 			errs = append(errs, err)
 		}
 	}
-	if len(ix.roots) > 0 && len(errs) == len(ix.roots) {
+	if len(walked) > 0 && len(errs) == len(walked) {
 		return errors.Join(errs...)
-	}
-	pos := make(map[string]int, len(es))
-	for i, e := range es {
-		pos[e.path] = i
 	}
 	ix.mu.Lock()
 	ix.entries, ix.pos, ix.built, ix.dirty = es, pos, time.Now(), true
@@ -196,19 +210,20 @@ func (ix *Index) Load(path string) (ok bool, err error) {
 		return false, nil
 	}
 	var es []entry
+	pos := map[string]int{}
 	for sc.Scan() {
 		line := sc.Text()
 		if len(line) < 2 || (line[0] != 'd' && line[0] != 'f') {
 			return false, nil
 		}
+		if _, dup := pos[line[1:]]; dup {
+			continue // older caches list paths under overlapping roots twice
+		}
+		pos[line[1:]] = len(es)
 		es = append(es, newEntry(line[1:], line[0] == 'd'))
 	}
 	if err := sc.Err(); err != nil {
 		return false, err
-	}
-	pos := make(map[string]int, len(es))
-	for i, e := range es {
-		pos[e.path] = i
 	}
 	ix.mu.Lock()
 	ix.entries, ix.pos, ix.built, ix.dirty = es, pos, time.Unix(0, nanos), false

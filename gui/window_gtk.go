@@ -47,6 +47,8 @@ type window struct {
 	status      []string
 	icons       map[string]gio.Iconner
 	layer       bool // a layer-shell overlay, placed by us; else a plain window
+	placed      bool // placeX11 moved the window to placedAt since it was mapped
+	placedAt    [2]int
 	noIcons     bool // no SVG loader: GTK would recurse looking for image-missing
 	startHidden bool
 	settingText bool
@@ -234,7 +236,12 @@ func (w *window) build() {
 		w.hide() // Ctrl+Q quits; closing must not drop the hotkey
 		return true
 	})
-	w.win.ConnectMap(func() { coreglib.IdleAdd(w.place) })
+	w.win.ConnectMap(func() {
+		coreglib.IdleAdd(func() {
+			w.placed = false // the window manager may have placed it on map
+			w.place()
+		})
+	})
 	w.loadCSS()
 }
 
@@ -321,6 +328,7 @@ func (w *window) render() {
 	for c := w.list.FirstChild(); c != nil; c = w.list.FirstChild() {
 		w.list.Remove(c)
 	}
+	w.refit()
 	ls, _ := lines(&w.m, w.notes())
 	w.sep.SetVisible(len(ls) > 0)
 	if len(ls) > 0 {
@@ -466,18 +474,84 @@ func loadIcon(e index.Entry) gio.Iconner {
 }
 
 // place hangs the card where the Windows window would be: a collapsed
-// list from a fixed top, an expanded one centered. Only the overlay is
-// placed; a plain window is where the desktop puts it.
+// list from a fixed top, an expanded one centered, all on the monitor.
+// The overlay moves the card inside it; a plain window on X11 is moved
+// itself. Wayland without layer shell cannot place a window.
 func (w *window) place() {
+	if w.refit() {
+		w.render() // the height became known or changed: fewer rows fit
+		return
+	}
+	_, h := lines(&w.m, w.notes())
 	if !w.layer {
+		w.placeX11(h)
 		return
 	}
 	monH := w.win.Height()
 	if monH <= 0 {
 		return
 	}
-	_, h := lines(&w.m, w.notes())
 	w.card.SetMarginTop(topMargin(monH, h, w.m.Expanded))
+}
+
+// refit lowers the rows of the model so the card fits the height it may
+// use; true when that changed what is shown.
+func (w *window) refit() bool {
+	avail := w.availHeight()
+	if avail <= 0 {
+		return false
+	}
+	return fitRows(&w.m, w.notes(), avail)
+}
+
+// availHeight is the overlay's height, or the work area height of a plain
+// X11 window's monitor; 0 while unknown (not realized, Wayland window).
+func (w *window) availHeight() int {
+	if w.layer {
+		return w.win.Height()
+	}
+	s := w.win.Surface()
+	if s == nil {
+		return 0
+	}
+	mon := w.monitor()
+	if mon == nil {
+		mon = gdk.DisplayGetDefault().MonitorAtSurface(s)
+	}
+	if mon == nil {
+		return 0
+	}
+	_, _, _, h, ok := x11Workarea(mon)
+	if !ok {
+		return 0
+	}
+	return h
+}
+
+// placeX11 keeps a plain window of height h inside the work area of its
+// monitor, centered horizontally.
+func (w *window) placeX11(h int) {
+	s := w.win.Surface()
+	if s == nil {
+		return
+	}
+	mon := w.monitor()
+	if mon == nil {
+		mon = gdk.DisplayGetDefault().MonitorAtSurface(s)
+	}
+	if mon == nil {
+		return
+	}
+	x, y, mw, mh, ok := x11Workarea(mon)
+	if !ok {
+		return
+	}
+	pos := [2]int{x + max(0, (mw-winWidth)/2), y + topMargin(mh, h, w.m.Expanded)}
+	if w.placed && w.placedAt == pos {
+		return
+	}
+	w.placed = x11Move(s, pos[0], pos[1])
+	w.placedAt = pos
 }
 
 func (w *window) monitor() *gdk.Monitor {

@@ -20,11 +20,11 @@ import (
 // portableSource names the portable-program source in messages.
 const portableSource = "portable"
 
-// platformFiles is ora's own file index, opened on first use.
+// platformFiles is ora's own file index, opened on first use. A failed
+// open is tried again on the next use.
 type platformFiles struct {
-	once    sync.Once
+	mu      sync.Mutex
 	ix      *files.Index
-	err     error
 	path    string
 	scanned bool // built in this process, no rescan needed for `ora index`
 	watched bool
@@ -57,8 +57,16 @@ func (e *Engine) fileRoots() []string {
 
 func (e *Engine) fileIndex() (*files.Index, error) {
 	f := &e.files
-	f.once.Do(func() { f.ix, f.err = e.openFiles() })
-	return f.ix, f.err
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ix == nil {
+		ix, err := e.openFiles()
+		if err != nil {
+			return nil, err
+		}
+		f.ix = ix
+	}
+	return f.ix, nil
 }
 
 // openFiles loads the cached file index. A missing one is built now; a

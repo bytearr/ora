@@ -97,6 +97,29 @@ func collapsedHeight() int {
 	return 2*padPx + boxPx + 2*listGapPx + headerPx + visibleRows*rowPx + morePx
 }
 
+// fitRows lowers the rows m shows, in the state it is in, until the card is
+// at most avail high; the rest scrolls. The constants stay the maximum.
+// It reports whether the limits changed.
+func fitRows(m *Model, notes []string, avail int) bool {
+	v0, e0 := m.RowLimits()
+	v, e := visibleRows, expandedRows
+	for {
+		m.SetRowLimits(v, e)
+		if _, h := lines(m, notes); h <= avail {
+			break
+		}
+		if m.Expanded && e > 1 {
+			e--
+		} else if !m.Expanded && v > 1 {
+			v--
+		} else {
+			break
+		}
+	}
+	v1, e1 := m.RowLimits()
+	return v1 != v0 || e1 != e0
+}
+
 // topMargin is the distance of the window from the top of a monitor of
 // height monH: a collapsed list hangs from a fixed top, an expanded one is
 // centered; both stay on the monitor.

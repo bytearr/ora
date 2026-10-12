@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -101,9 +102,16 @@ var terminals = [][]string{
 	{"xterm", "-e"},
 }
 
+// terminal is $TERMINAL with the arguments of its entry in terminals, or
+// "-e" for an emulator not in the list; else the first one installed.
 func terminal() ([]string, error) {
 	if t := os.Getenv("TERMINAL"); t != "" {
 		if p, err := exec.LookPath(t); err == nil {
+			for _, known := range terminals {
+				if filepath.Base(p) == known[0] {
+					return append([]string{p}, known[1:]...), nil
+				}
+			}
 			return []string{p, "-e"}, nil
 		}
 	}
@@ -129,11 +137,21 @@ func spawn(dir, name string, args ...string) error {
 
 // runHelper runs a desktop helper and reports its failure if it exits
 // within helperWait; one still running is taken as started.
+//
+// Its stderr is an unlinked temp file handed over as a file, so Wait waits
+// for the helper only. gio passes its stderr on to the app it starts; the
+// app keeps writing to the same file without SIGPIPE after ora exits, and
+// the file is gone once the app ends. Without a temp file stderr is
+// /dev/null.
 func runHelper(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	var stderr limitedBuffer
-	cmd.Stderr = &stderr
+	f, err := os.CreateTemp("", "ora-helper-*")
+	if err == nil {
+		os.Remove(f.Name())
+		defer f.Close()
+		cmd.Stderr = f
+	}
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -141,8 +159,12 @@ func runHelper(name string, args ...string) error {
 	go func() { done <- cmd.Wait() }()
 	select {
 	case err := <-done:
-		if err != nil && stderr.Len() > 0 {
-			return fmt.Errorf("%w: %s", err, stderr.String())
+		if err != nil && cmd.Stderr != nil {
+			buf := make([]byte, helperStderrMax)
+			n, _ := f.ReadAt(buf, 0)
+			if msg := strings.TrimRight(string(buf[:n]), "\n "); msg != "" {
+				return fmt.Errorf("%w: %s", err, msg)
+			}
 		}
 		return err
 	case <-time.After(helperWait):
@@ -150,27 +172,9 @@ func runHelper(name string, args ...string) error {
 	}
 }
 
-type limitedBuffer struct{ b []byte }
-
-func (l *limitedBuffer) Write(p []byte) (int, error) {
-	if room := 512 - len(l.b); room > 0 {
-		if len(p) < room {
-			room = len(p)
-		}
-		l.b = append(l.b, p[:room]...)
-	}
-	return len(p), nil
-}
-
-func (l *limitedBuffer) Len() int { return len(l.b) }
-
-func (l *limitedBuffer) String() string {
-	b := l.b
-	for len(b) > 0 && (b[len(b)-1] == '\n' || b[len(b)-1] == ' ') {
-		b = b[:len(b)-1]
-	}
-	return string(b)
-}
+// helperStderrMax is how much of a failed helper's stderr goes into its
+// error.
+const helperStderrMax = 512
 
 func openWithDefault(path string) error {
 	if p, err := exec.LookPath("xdg-open"); err == nil {

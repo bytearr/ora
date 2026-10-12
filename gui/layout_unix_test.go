@@ -91,6 +91,55 @@ func TestTopMargin(t *testing.T) {
 	}
 }
 
+func TestFitRows(t *testing.T) {
+	var m Model
+	m.SetQuery("", false)
+	var names []string
+	for i := range 30 {
+		names = append(names, string(rune('a'+i%26))+string(rune('a'+i/26)))
+	}
+	m.Apply(Result{Gen: m.Gen, Rows: rowsOf(names...)})
+	m.Move(visibleRows)
+	m.Activate(false) // Show more
+	m.Move(20)
+	_, full := lines(&m, nil)
+
+	if fitRows(&m, nil, 1003) {
+		t.Fatal("a tall enough screen keeps the rows")
+	}
+	if _, h := lines(&m, nil); h != full {
+		t.Fatalf("height changed on a tall screen: %d, was %d", h, full)
+	}
+
+	if !fitRows(&m, nil, 500) {
+		t.Fatal("a short screen must lower the rows")
+	}
+	_, h := lines(&m, nil)
+	_, exp := m.RowLimits()
+	if h > 500 || exp >= expandedRows {
+		t.Fatalf("height %d with %d rows on 500 px", h, exp)
+	}
+	if first, vis := m.Visible(); m.Sel < first || m.Sel >= first+len(vis) {
+		t.Fatalf("selection %d off screen (%d..%d)", m.Sel, first, first+len(vis)-1)
+	}
+	m.Scroll(100)
+	if first, vis := m.Visible(); first+len(vis) != len(m.Rows) {
+		t.Fatal("the rest must still scroll in")
+	}
+
+	m.SetQuery("", false)
+	m.Apply(Result{Gen: m.Gen, Rows: rowsOf(names...)})
+	fitRows(&m, nil, 300)
+	vis, _ := m.RowLimits()
+	if _, h := lines(&m, nil); h > 300 || vis >= visibleRows {
+		t.Fatalf("collapsed: height %d with %d rows on 300 px", h, vis)
+	}
+	fitRows(&m, nil, 2000)
+	if v, e := m.RowLimits(); v != visibleRows || e != expandedRows {
+		t.Fatalf("a tall screen restores the maximum: %d %d", v, e)
+	}
+}
+
 func TestRowText(t *testing.T) {
 	name, sub, path := rowText(Row{Entry: index.Entry{Name: "Firefox", Kind: index.KindDesktop}})
 	if name != "Firefox" || sub != "App" || path {
